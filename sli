@@ -1,0 +1,450 @@
+#!/bin/bash
+#
+# Simply Lightning - A versatile shell utility that simplifies Bitcoin
+# Lightning Network packages management while offering a suite of handy
+# tools for seamless node operations.
+#
+# (c) 2025 0xeeLi - MIT License
+#
+sli_version="0.1.1"
+
+# Configurable Variables
+SLI_DATA="$HOME/.sli"
+LIT_CONFIG="$HOME/.lit/lit.conf"
+EDITOR="nano"
+
+#
+# Internal Variables
+#
+pkgs=${SLI_DATA}/packages
+cache=${SLI_DATA}/cache
+pkgs_list=${SLI_DATA}/packages.list
+pkgs_url="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
+
+# Colors
+purple='\033[1;35m'
+cyan='\033[1;36m'
+yellow='\033[0;33m'
+red='\033[1;31m'
+nc='\033[0m' # No color
+
+# Let's have default empty line for all actions
+echo ""
+
+#
+# Functions
+#
+
+# Display usage instructions (ident with space)
+usage() {
+	cat << EOT
+Usage  : $(basename $0) [command|tool] [pkg|arg] [arg]
+Example: $(basename $0) lit install
+$(separator)
+Commands:
+
+  init              Initialize: sli lit wallet
+  start             Start a deamon: litd
+  stop              Stop a deamon: litd
+  re|reload         Reload  a deamon: litd
+  sc|show-config    Display config file: lit.conf
+  ed|edit           Edit a config file: lit.conf
+
+Tools:
+
+  m2h|macaroon-hex  Get the HEX format of a macaroon
+
+Packages Manager:
+
+  in|install       Install a package
+  ls|list          List packages
+  cc|clean-cache   Remove downloaded packges tarball
+  rm|remove        Remove a package
+EOT
+}
+
+separator() {
+	echo -e "${purple}--------------------------------------------------------------------------------${nc}"
+}
+
+# Should be run at first usage - Self install ;-)
+sli_init() {
+	pkg="sli"
+	echo "⚡️ SLi Initialization"
+	separator
+	echo -e "Creating data structure in: ${yellow}$SLI_DATA${nc}"
+	mkdir -p ${pkgs}/${pkg} ${SLI_DATA}/cache
+	echo -e "Storing curent SLi version: ${cyan}$sli_version${nc}"
+	echo "version=\"$sli_version\"" > ${pkgs}/${pkg}/pkg.conf
+	echo -e "Installing sli: /usr/local/bin/${pkg}"
+	sudo cp -f ${0} /usr/local/bin
+	echo "/usr/local/bin/sli" >  ${pkgs}/${pkg}/files.list
+	[ -f "$pkgs_list" ] || pkgs_get_list
+	separator
+}
+
+# Let user use lit in place of litd
+service_check() {
+	if [ "$1" == "lit" ]; then
+		service="litd"
+	else
+		service="$1"
+	fi
+}
+
+start() {
+	service_check ${1}
+	echo "⚡️ Starting $service service..."
+	sudo systemctl start ${service}
+}
+
+stop() {
+	service_check ${1}
+	echo "⚡️ Stopping $service service..."
+	sudo systemctl stop ${service}
+}
+
+reload() {
+	service_check ${1}
+	echo "⚡️ Reloading $service service..."
+	sudo systemctl stop ${service}
+	sleep 2
+	sudo systemctl start ${service}
+}
+
+config_show() {
+	echo "⚡️ Configuration file for: $1"
+	separator
+	case "$1" in
+		lit)
+			if [ ! -f "$LIT_CONFIG" ]; then
+				echo "No config file, run --> sli init lit"
+			else
+				cat ${LIT_CONFIG}
+			fi ;;
+		*)
+			echo "No config file for: $1" ;;
+	esac
+	separator
+}
+
+config_edit() {
+	case "$1" in
+		lit)
+			if [ ! -f "$LIT_CONFIG" ]; then
+				echo "No config file, run --> sli init lit"
+			else
+				${EDITOR} ${LIT_CONFIG}
+			fi ;;
+		*)
+			echo "No config file for: $1" ;;
+	esac
+}
+
+# Create a wallet if none
+wallet_init() {
+	if [ ! -f "$HOME/.lnd/data/chain/bitcoin/mainnet/wallet.db" ]; then
+		lncli create
+	else
+		echo "A wallet database already exist:"
+		echo -e " --> ${yellow}$HOME/.lnd/data/chain/bitcoin/mainnet/wallet.db${nc}"
+	fi
+}
+
+# Basic and working lit.conf to get started
+lit_config_file() {
+	cat << EOT
+#
+# LiTd Settings: lit.conf
+#
+uipassword=
+lnd-mode=integrated
+
+#
+# LND Settings
+#
+
+# Wallet
+#lnd.wallet-unlock-password-file=/home/$USER/.lnd/wallet_password
+#lnd.wallet-unlock-allow-create=true
+
+# Set a nice name for your node
+lnd.alias=SLiNode
+
+# Optional URL for external fee estimation.
+lnd.feeurl=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
+
+# Used by Lit UI
+lnd.rpcmiddleware.enable=true
+
+#
+# Bitcoin Configuration
+#
+
+# Use a neutrino light back-end so we don't need a full ₿ node.
+lnd.bitcoin.node=neutrino
+
+# Connect to mainnet
+lnd.bitcoin.mainnet=1
+lnd.bitcoin.active=1
+
+# The seed DNS server(s) to use for initial peer discovery.
+lnd.bitcoin.dnsseed=nodes.lightning.directory,soa.nodes.lightning.directory
+EOT
+}
+
+# Lit Systemd service set to current $USER
+lit_service_file() {
+	cat << EOT
+[Unit]
+Description=Litd Terminal Daemon
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=120
+ExecStart=/usr/local/bin/litd litd
+User=$USER
+
+[Install]
+WantedBy=multi-user.target
+EOT
+}
+
+# Lightning Terminal install function
+lit_install() {
+	# Custom version ?
+	if [ -n "$1" ]; then
+		lit_version="$1"
+	else
+		[ -f "$pkgs_list" ] || pkgs_get_list
+		lit_version=$(grep "^lit|" ${pkgs_list} | cut -d "|" -f 2)
+	fi
+
+	# Set variables
+	pkg=${pkgs}/lit
+	url="https://github.com/lightninglabs/lightning-terminal/releases/download/"
+	tarball="lightning-terminal-linux-amd64-${lit_version}.tar.gz"
+	litdir="lightning-terminal-linux-amd64-$lit_version"
+	dlurl=${url}${lit_version}/${tarball}
+
+	echo "⚡️ Installing: Lightning Terminal $lit_version"
+	separator
+	# Already installed ?
+	if [ -d ${pkg} ]; then
+		source ${pkg}/pkg.conf
+		echo -e "${cyan}Lit is already installed${nc}"
+		echo "Version: $version" && unset version
+		echo "" && exit 0
+	fi
+
+	# We work in Sli cache directory
+	mkdir -p ${pkg} ${cache} && cd ${cache}
+
+	pkg_download_tarball ${tarball} ${dlurl}
+
+	# Record version
+	echo "version=\"$lit_version\"" > ${pkg}/pkg.conf
+
+	# Extract
+	echo "Extracting: $tarball"
+	tar xzf ${tarball}
+
+	# Install to /usr/local/bin
+	echo -e "${cyan}Install path: /usr/local/bin${nc}"
+	rm -f ${pkg}/files.list # Let's track installed files
+	for bin in $(ls $litdir); do
+		echo " * Installing: $bin"
+		sudo cp -f ${litdir}/${bin} /usr/local/bin
+		echo "/usr/local/bin/$bin" >> ${pkg}/files.list
+	done
+	rm -rf ${litdir}
+
+	# Systemd service
+	if [ ! -f /etc/systemd/system/litd.service ]; then
+		echo -e "${cyan}Creating systemd service file:${nc} litd.service"
+		lit_service_file > litd.service
+		sudo mv litd.service /etc/systemd/system/
+		echo "/etc/systemd/system/litd.service" >> ${pkg}/files.list
+	fi
+}
+
+# Initialize LiTd
+lit_init() {
+	echo "⚡️ Lit Initialization"
+	separator
+	if [ ! -f "$LIT_CONFIG" ]; then
+		echo -e "Creating config file: ${yellow}$LIT_CONFIG${nc}"
+		mkdir -p ${HOME}/.lit && touch ${LIT_CONFIG}
+		lit_config_file > ${LIT_CONFIG}
+	else
+		echo -e "Config file already exist:"
+		echo -e " --> ${yellow}$LIT_CONFIG${nc}"
+	fi
+}
+
+#
+# Tools functions
+#
+
+# $ sli macaroon admin
+macaroon_to_hex() {
+	path="$HOME/.lnd/data/chain/bitcoin/mainnet"
+	echo "⚡️ Macaroon to HEX"
+	separator
+	if [ -n "$1" ]; then
+		macaroon="$1"
+	else
+		macaroon="admin" # Default to admin
+	fi
+	# We need xxd installed
+	if [ ! -x /usr/bin/xxd ]; then
+		echo "Please install: xxd"
+		echo "\$ apt install xxd"
+	fi
+	if [ ! -f ${path}/${macaroon}.macaroon ]; then
+		echo "No macaroon found at:"
+		echo " --> ${path}/${macaroon}.macaroon"
+	else
+		xxd -ps -u -c 1000 ${path}/${macaroon}.macaroon
+	fi
+	separator
+}
+
+#
+# Packages Manager functions
+#
+
+# Download pkg if needed
+pkg_download_tarball() {
+	if [ ! -f ${cache}/${tarball} ]; then
+		echo "Downloading: $tarball"
+		wget -q ${dlurl} || $(echo "ERROR" && exit 1)
+	else
+		echo "Using cache: ${tarball}"
+	fi
+}
+
+pkgs_get_list() {
+	mkdir -p ${cache} && cd ${cache}
+	echo "Getting packages list from GitHub..."
+	wget -q ${pkgs_url} || exit 1
+	mv -f packages.list ${SLI_DATA}
+}
+
+pkgs_list() {
+	echo "⚡️ Installed packages"
+	separator
+	for pkg in $(ls ${pkgs}); do
+		source ${pkgs}/${pkg}/pkg.conf
+		echo "$pkg $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
+		unset version
+	done
+	separator
+	echo ""
+	echo "⚡️ Available packages"
+	separator
+	# Ensure packages.list was downloaded
+	[ -f "$pkgs_list" ] || pkgs_get_list
+	for pkg in $(cat ${pkgs_list}); do
+		name=$(echo $pkg | cut -d "|" -f 1)
+		version=$(echo $pkg | cut -d "|" -f 2)
+		echo "$name $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
+	done
+	separator
+}
+
+# Remove system files keep config/data in ~/.*
+pkg_remove() {
+	pkg="$1"
+	if [ ! -d ${pkgs}/${pkg} ]; then
+		echo -e "Can't find package: ${red}$pkg${nc}"
+		echo "" && exit 1
+	fi
+	echo "⚡️ Removing package: $pkg"
+	separator
+	for file in $(cat ${pkgs}/${pkg}/files.list); do
+		echo " * Removing: $file"
+		sudo rm -f ${file}
+	done
+	rm -rf ${pkgs}/${pkg}
+	separator
+}
+
+#
+# Commands handler
+#
+
+case "$1" in
+
+	init)
+		# Initialization
+		case "$2" in
+			wallet)
+				echo "⚡️ Wallet Initialization"
+				separator
+				wallet_init ;;
+			lit)
+				lit_init ;;
+			*)
+				sli_init ;;
+		esac ;;
+
+	start|run)
+		start ${2} ;;
+
+	stop|kill)
+		stop ${2} ;;
+
+	re|reload)
+		reload ${2} ;;
+
+	sc|show-config)
+		config_show ${2} ;;
+
+	ed|edit)
+		nano ${LIT_CONFIG} ;;
+
+	#
+	# Tools
+	#
+
+	m2h|macaroon-to-hex)
+		macaroon_to_hex ${2} ;;
+
+	#
+	# Packages manager
+	#
+
+	'in'|install)
+		if [ $(declare -F ${2}_install) ]; then
+			${2}_install ${3} # $3 = version
+			separator
+		else
+			echo "No package named: $2"
+		fi ;;
+
+	ls|list)
+		pkgs_list ;;
+
+	up|upgrade)
+		# Downlad a packages.list, compare installed version to the list
+		# upgrade everything
+		pkgs_get_list
+		#pkgs_upgarde
+		;;
+
+	cc|clean-cache)
+		echo "Removing cache content..."
+		rm -rf ${cache}/* ;;
+
+	rm|remove)
+		pkg_remove ${2} ;;
+
+	*)
+		usage ;;
+
+esac
+
+echo ""
+exit 0
