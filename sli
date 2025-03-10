@@ -50,6 +50,8 @@ $(echo -e "${YELLOW}Commands:${NC}")
   re|reload          Reload  a deamon: litd
   sc|show-config     Display config file: lit.conf
   ed|edit            Edit a config file: lit.conf
+  logs               Show last logs for a service (default: 30 lines)
+  status             Show service status
 
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
@@ -97,37 +99,57 @@ sli_init() {
 
 # Let user use lit in place of litd
 service_check() {
-	if [ -z "$1" ]; then
-		echo "Missing service name. Usage: sli [start|stop|reload] service"
+	if [ -z "$2" ]; then
+		echo "Missing service name. Usage: sli $1 <service>"
 		echo "" && exit 1
 	fi
-	if [ "$1" == "lit" ]; then
+	if [ "$2" == "lit" ]; then
 		service="litd"
 	else
-		service="$1"
+		service="$2"
 	fi
 }
 
 service_start() {
-	service_check "$1" || return 1
+	service_check "$@" || return 1
 	echo "⚡️ Starting $service service..."
 	sudo systemctl start ${service}
 	wallet_state
 }
 
 service_stop() {
-	service_check ${1}
+	service_check "$@" || return 1
 	echo "⚡️ Stopping $service service..."
 	sudo systemctl stop ${service}
 }
 
 service_reload() {
-	service_check ${1}
+	service_check "$@" || return 1
 	echo "⚡️ Reloading $service service..."
 	sudo systemctl stop ${service}
 	sleep 2
 	sudo systemctl start ${service}
 	wallet_state
+}
+
+# View service/daemon logs
+service_logs() {
+	local lines="${3:-30}"
+	service_check ${@}
+	echo -e "⚡️ Showing last $lines lines of logs for: ${CYAN}${service}${NC}"
+    print_separator
+	journalctl -q -u "$service" -n "$lines" --no-pager
+	print_separator
+}
+
+# View service/daemon status
+service_status() {
+	service_check ${@}
+	echo -e "⚡️ Service status for: ${CYAN}${service}${NC}"
+    print_separator
+    script -q -c "systemctl status ${service} --no-pager" /dev/null | sed '/^\s*└─/q'
+    stty sane # Restore terminal settings
+	print_separator
 }
 
 config_show() {
@@ -460,21 +482,20 @@ handle_command() {
 					sli_init ;;
 			esac ;;
 	
-		start) service_start ${2} ;;
-		stop) service_stop ${2} ;;	
-		re|reload) service_reload ${2} ;;
+		start) service_start ${@} ;;
+		stop) service_stop ${@} ;;	
+		re|reload) service_reload ${@} ;;
 		sc|show-config) config_show ${2} ;;
 		ed|edit) config_edit ${2} ;;
+		logs) service_logs ${@} ;;
+		status) service_status ${@} ;;
 	
 		#
 		# --- Tools ---
 		#
 	
-		m2h|macaroon-to-hex)
-			macaroon_to_hex ${2} ;;
-	
-		gpw|gen-passwords)
-			passwords_gen ${@} ;;
+		m2h|macaroon-to-hex) macaroon_to_hex ${2} ;;
+		gpw|gen-passwords) passwords_gen ${@} ;;
 	
 		#
 		# --- Packages manager ---
@@ -482,7 +503,7 @@ handle_command() {
 	
 		'in'|install)
 			if [ "$2" == "sli" ]; then
-				echo "SLi will self update" 
+				echo "If you need to reinstall this version, run: sli init" 
 				echo "" && exit 0
 			fi
 			if [ $(declare -F ${2}_install) ]; then
