@@ -35,7 +35,7 @@ RED='\033[1;31m'
 NC='\033[0m' # No color
 
 #
-# --- Functions ---
+# --- Helper Functions ---
 #
 
 # Display usage instructions (ident with space)
@@ -75,6 +75,10 @@ check_command() {
 	fi
 }
 
+#
+# --- Core Functions ---
+#
+
 # Should be run at first usage - Self install ;-)
 sli_init() {
 	pkg="sli"
@@ -104,20 +108,20 @@ service_check() {
 	fi
 }
 
-start() {
+service_start() {
 	service_check "$1" || return 1
 	echo "⚡️ Starting $service service..."
 	sudo systemctl start ${service}
 	wallet_state
 }
 
-stop() {
+service_stop() {
 	service_check ${1}
 	echo "⚡️ Stopping $service service..."
 	sudo systemctl stop ${service}
 }
 
-reload() {
+service_reload() {
 	service_check ${1}
 	echo "⚡️ Reloading $service service..."
 	sudo systemctl stop ${service}
@@ -330,7 +334,7 @@ macaroon_to_hex() {
 }
 
 # Generate strong passwords for Lit UI or Wallet
-gen_passwords() {
+passwords_gen() {
 	echo "⚡️ Gen Passwords with: pwgen or openssl"
 	print_separator
 	echo ""
@@ -367,7 +371,7 @@ gen_passwords() {
 			echo "Updating: $LIT_CONF"
 			sed -i s/"uipassword=.*"/"uipassword=${ui_pwd}"/ ${LIT_CONF}
 			# Lit must reload to use the new password
-			reload litd
+			service_reload litd
 			echo ""
 			echo "Make sure your wallet is unlock to login with your new password."
 		fi
@@ -456,20 +460,11 @@ handle_command() {
 					sli_init ;;
 			esac ;;
 	
-		start|run)
-			start ${2} ;;
-	
-		stop|kill)
-			stop ${2} ;;
-	
-		re|reload)
-			reload ${2} ;;
-	
-		sc|show-config)
-			config_show ${2} ;;
-	
-		ed|edit)
-			config_edit ${2} ;;
+		start) service_start ${2} ;;
+		stop) service_stop ${2} ;;	
+		re|reload) service_reload ${2} ;;
+		sc|show-config) config_show ${2} ;;
+		ed|edit) config_edit ${2} ;;
 	
 		#
 		# --- Tools ---
@@ -479,7 +474,7 @@ handle_command() {
 			macaroon_to_hex ${2} ;;
 	
 		gpw|gen-passwords)
-			gen_passwords ${@} ;;
+			passwords_gen ${@} ;;
 	
 		#
 		# --- Packages manager ---
@@ -516,7 +511,6 @@ handle_command() {
 	
 		*)
 			usage ;;
-	
 	esac
 }
 
