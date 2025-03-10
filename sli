@@ -34,9 +34,6 @@ yellow='\033[0;33m'
 red='\033[1;31m'
 nc='\033[0m' # No color
 
-# Let's have default empty line for all actions
-echo ""
-
 #
 # Functions
 #
@@ -89,7 +86,7 @@ sli_init() {
 # Let user use lit in place of litd
 service_check() {
 	if [ -z "$1" ]; then
-		echo "Missing service name, try: sli [start|stop|reload] service"
+		echo "Missing service name. Usage: sli [start|stop|reload] service"
 		echo "" && exit 1
 	fi
 	if [ "$1" == "lit" ]; then
@@ -103,6 +100,7 @@ start() {
 	service_check ${1}
 	echo "⚡️ Starting $service service..."
 	sudo systemctl start ${service}
+	wallet_state
 }
 
 stop() {
@@ -117,20 +115,21 @@ reload() {
 	sudo systemctl stop ${service}
 	sleep 2
 	sudo systemctl start ${service}
+	wallet_state
 }
 
 config_show() {
-	echo "⚡️ Configuration file for: $1"
+	echo "⚡️ Configuration file for: ${cyan}$1${nc}"
 	separator
 	case "$1" in
 		lit)
 			if [ ! -f "$LIT_CONF" ]; then
-				echo "No config file, run --> sli init lit"
+				echo -e "No config file, run --> sli init lit"
 			else
 				cat ${LIT_CONF}
 			fi ;;
 		*)
-			echo "No config file for: $1" ;;
+			echo -e "No config file for: ${cyan}$1${nc}" ;;
 	esac
 	separator
 }
@@ -155,6 +154,12 @@ wallet_init() {
 	else
 		echo "A wallet database already exist:"
 		echo -e " --> ${yellow}$LND_DIR/data/chain/bitcoin/mainnet/wallet.db${nc}"
+	fi
+}
+
+wallet_state() {
+	if [ "$(lncli state | grep LOCKED)" ]; then
+		echo "🔒 Wallet is locked. Unlock manualy: lncli unlock"
 	fi
 }
 
@@ -429,80 +434,84 @@ pkg_remove() {
 #
 # Commands handler
 #
-
-case "$1" in
-
-	init)
-		# Initialization
-		case "$2" in
-			wallet)
-				echo "⚡️ Wallet Initialization"
+commands_handler() {
+	case "$1" in
+	
+		init)
+			# Initialization
+			case "$2" in
+				wallet)
+					echo "⚡️ Wallet Initialization"
+					separator
+					wallet_init ;;
+				lit)
+					lit_init ;;
+				*)
+					sli_init ;;
+			esac ;;
+	
+		start|run)
+			start ${2} ;;
+	
+		stop|kill)
+			stop ${2} ;;
+	
+		re|reload)
+			reload ${2} ;;
+	
+		sc|show-config)
+			config_show ${2} ;;
+	
+		ed|edit)
+			config_edit ${2} ;;
+	
+		#
+		# Tools
+		#
+	
+		m2h|macaroon-to-hex)
+			macaroon_to_hex ${2} ;;
+	
+		gpw|gen-passwords)
+			gen_passwords ${@} ;;
+	
+		#
+		# Packages manager
+		#
+	
+		'in'|install)
+			if [ $(declare -F ${2}_install) ]; then
+				${2}_install ${3} # $3 = version
 				separator
-				wallet_init ;;
-			lit)
-				lit_init ;;
-			*)
-				sli_init ;;
-		esac ;;
+			else
+				echo "No package named: $2"
+			fi ;;
+	
+		ls|list)
+			pkgs_list ;;
+	
+		up|upgrade)
+			# Downlad a packages.list, compare installed version to the list
+			# upgrade everything
+			pkgs_get_list
+			#pkgs_upgarde
+			;;
+	
+		cc|clean-cache)
+			echo "Removing cache content..."
+			rm -rf ${cache}/* ;;
+	
+		rm|remove)
+			pkg_remove ${2} ;;
+	
+		*)
+			usage ;;
+	
+	esac
+}
 
-	start|run)
-		start ${2} ;;
-
-	stop|kill)
-		stop ${2} ;;
-
-	re|reload)
-		reload ${2} ;;
-
-	sc|show-config)
-		config_show ${2} ;;
-
-	ed|edit)
-		nano ${LIT_CONF} ;;
-
-	#
-	# Tools
-	#
-
-	m2h|macaroon-to-hex)
-		macaroon_to_hex ${2} ;;
-
-	gpw|gen-passwords)
-		gen_passwords ${@} ;;
-
-	#
-	# Packages manager
-	#
-
-	'in'|install)
-		if [ $(declare -F ${2}_install) ]; then
-			${2}_install ${3} # $3 = version
-			separator
-		else
-			echo "No package named: $2"
-		fi ;;
-
-	ls|list)
-		pkgs_list ;;
-
-	up|upgrade)
-		# Downlad a packages.list, compare installed version to the list
-		# upgrade everything
-		pkgs_get_list
-		#pkgs_upgarde
-		;;
-
-	cc|clean-cache)
-		echo "Removing cache content..."
-		rm -rf ${cache}/* ;;
-
-	rm|remove)
-		pkg_remove ${2} ;;
-
-	*)
-		usage ;;
-
-esac
-
+# Let's have default empty line for all actions
+echo ""
+commands_handler ${@}
 echo ""
 exit 0
