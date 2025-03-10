@@ -9,17 +9,22 @@
 sli_version="0.1.1"
 
 # Configurable Variables
-SLI_DATA="$HOME/.sli"
-LIT_CONFIG="$HOME/.lit/lit.conf"
-WALLET_PASSWORD="$HOME/.lnd/wallet_password"
+SLI_DIR="$HOME/.sli"
+LIT_DIR="$HOME/.lit"
+LIT_CONF="$LIT_DIR/lit.conf"
+LND_DIR="$HOME/.lnd"
+WALLET_PASSWORD="$LND_DIR/wallet_password"
 EDITOR="nano"
+
+# Load custom conf
+[ -f "$SLI_DIR/sli.conf" ] && source ${SLI_DIR}/sli.conf
 
 #
 # Internal Variables
 #
-pkgs=${SLI_DATA}/packages
-cache=${SLI_DATA}/cache
-pkgs_list=${SLI_DATA}/packages.list
+pkgs=${SLI_DIR}/packages
+cache=${SLI_DIR}/cache
+pkgs_list=${SLI_DIR}/packages.list
 pkgs_url="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 
 # Colors
@@ -39,11 +44,9 @@ echo ""
 # Display usage instructions (ident with space)
 usage() {
 	cat << EOT
-Usage  : $(basename $0) [command|tool] [pkg|arg] [arg]
-Example: $(basename $0) lit install
+Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
 $(separator)
-Commands:
-
+$(echo -e "${yellow}Commands:${nc}")
   init               Initialize: sli lit wallet
   start              Start a deamon: litd
   stop               Stop a deamon: litd
@@ -51,13 +54,11 @@ Commands:
   sc|show-config     Display config file: lit.conf
   ed|edit            Edit a config file: lit.conf
 
-Tools:
-
+$(echo -e "${yellow}Tools:${nc}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
   gpw|gen-passwords  Gen new passwords for the wallet and Lit UI
 
-Packages Manager:
-
+$(echo -e "${yellow}Packages Manager:${nc}")
   in|install         Install a package
   ls|list            List packages
   cc|clean-cache     Remove downloaded packges tarball
@@ -74,8 +75,8 @@ sli_init() {
 	pkg="sli"
 	echo "⚡️ SLi Initialization"
 	separator
-	echo -e "Creating data structure in: ${yellow}$SLI_DATA${nc}"
-	mkdir -p ${pkgs}/${pkg} ${SLI_DATA}/cache
+	echo -e "Creating data structure in: ${yellow}$SLI_DIR${nc}"
+	mkdir -p ${pkgs}/${pkg} ${SLI_DIR}/cache
 	echo -e "Storing curent SLi version: ${cyan}$sli_version${nc}"
 	echo "version=\"$sli_version\"" > ${pkgs}/${pkg}/pkg.conf
 	echo -e "Installing sli: /usr/local/bin/${pkg}"
@@ -87,6 +88,10 @@ sli_init() {
 
 # Let user use lit in place of litd
 service_check() {
+	if [ -z "$1" ]; then
+		echo "Missing service name, try: sli [start|stop|reload] service"
+		echo "" && exit 1
+	fi
 	if [ "$1" == "lit" ]; then
 		service="litd"
 	else
@@ -119,10 +124,10 @@ config_show() {
 	separator
 	case "$1" in
 		lit)
-			if [ ! -f "$LIT_CONFIG" ]; then
+			if [ ! -f "$LIT_CONF" ]; then
 				echo "No config file, run --> sli init lit"
 			else
-				cat ${LIT_CONFIG}
+				cat ${LIT_CONF}
 			fi ;;
 		*)
 			echo "No config file for: $1" ;;
@@ -133,10 +138,10 @@ config_show() {
 config_edit() {
 	case "$1" in
 		lit)
-			if [ ! -f "$LIT_CONFIG" ]; then
+			if [ ! -f "$LIT_CONF" ]; then
 				echo "No config file, run --> sli init lit"
 			else
-				${EDITOR} ${LIT_CONFIG}
+				${EDITOR} ${LIT_CONF}
 			fi ;;
 		*)
 			echo "No config file for: $1" ;;
@@ -145,11 +150,11 @@ config_edit() {
 
 # Create a wallet if none
 wallet_init() {
-	if [ ! -f "$HOME/.lnd/data/chain/bitcoin/mainnet/wallet.db" ]; then
+	if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
 		lncli create
 	else
 		echo "A wallet database already exist:"
-		echo -e " --> ${yellow}$HOME/.lnd/data/chain/bitcoin/mainnet/wallet.db${nc}"
+		echo -e " --> ${yellow}$LND_DIR/data/chain/bitcoin/mainnet/wallet.db${nc}"
 	fi
 }
 
@@ -275,13 +280,13 @@ lit_install() {
 lit_init() {
 	echo "⚡️ Lit Initialization"
 	separator
-	if [ ! -f "$LIT_CONFIG" ]; then
-		echo -e "Creating config file: ${yellow}$LIT_CONFIG${nc}"
-		mkdir -p ${HOME}/.lit && touch ${LIT_CONFIG}
-		lit_config_file > ${LIT_CONFIG}
+	if [ ! -f "$LIT_CONF" ]; then
+		echo -e "Creating config file: ${yellow}$LIT_CONF${nc}"
+		mkdir -p ${HOME}/.lit && touch ${LIT_CONF}
+		lit_config_file > ${LIT_CONF}
 	else
 		echo -e "Config file already exist:"
-		echo -e " --> ${yellow}$LIT_CONFIG${nc}"
+		echo -e " --> ${yellow}$LIT_CONF${nc}"
 	fi
 }
 
@@ -291,7 +296,7 @@ lit_init() {
 
 # $ sli macaroon admin
 macaroon_to_hex() {
-	path="$HOME/.lnd/data/chain/bitcoin/mainnet"
+	path="$LND_DIR/data/chain/bitcoin/mainnet"
 	echo "⚡️ Macaroon to HEX"
 	separator
 	if [ -n "$1" ]; then
@@ -332,11 +337,12 @@ gen_passwords() {
 	fi
 	echo ""
 	echo -e "${cyan}Write down your new password in a secure place!${nc}"
+	echo ""
 	read -p "Do you wish to change Wallet password ? (yes/no) " change
 	if [ "$change" == "yes" ]; then
 		echo "You can copy/paste it below."
 		lncli changepassword
-		# Update or wallet_password ?
+		# Update a wallet_password file ?
 		if [ -f "$WALLET_PASSWORD" ]; then
 			echo "Updating: $WALLET_PASSWORD"
 			echo "${wallet_pwd}" > ${$WALLET_PASSWORD}
@@ -344,15 +350,19 @@ gen_passwords() {
 		fi
 	fi
 	unset change && echo ""
-	if [ -f "$LIT_CONFIG" ]; then
-		read -p "Do you wish to change Lit web UI password ? (yes/no) " change
+	if [ -f "$LIT_CONF" ]; then
+		read -p "Do you wish to change Lit Web UI password ? (yes/no) " change
 		if [ "$change" == "yes" ]; then
-			echo "Updating: $LIT_CONFIG"
-			sed -i s/"uipassword=.*"/"uipassword=${ui_pwd}"/ ${LIT_CONFIG}
+			echo "Updating: $LIT_CONF"
+			sed -i s/"uipassword=.*"/"uipassword=${ui_pwd}"/ ${LIT_CONF}
+			# Lit must reload to use the new password
+			reload litd
+			echo ""
+			echo "Make sure your wallet is unlock to login with your new password."
 		fi
 	fi
 	unset wallet_pwd ui_pwd
-	separator
+	echo "" && separator
 }
 
 #
@@ -373,12 +383,13 @@ pkgs_get_list() {
 	mkdir -p ${cache} && cd ${cache}
 	echo "Getting packages list from GitHub..."
 	wget -q ${pkgs_url} || exit 1
-	mv -f packages.list ${SLI_DATA}
+	mv -f packages.list ${SLI_DIR}
 }
 
 pkgs_list() {
 	echo "⚡️ Installed packages"
 	separator
+	[ -d "$pkgs" ] || mkdir ${pkgs}
 	for pkg in $(ls ${pkgs}); do
 		source ${pkgs}/${pkg}/pkg.conf
 		echo "$pkg $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
@@ -447,7 +458,7 @@ case "$1" in
 		config_show ${2} ;;
 
 	ed|edit)
-		nano ${LIT_CONFIG} ;;
+		nano ${LIT_CONF} ;;
 
 	#
 	# Tools
