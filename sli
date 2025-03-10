@@ -137,7 +137,7 @@ service_logs() {
 	local lines="${3:-30}"
 	service_check ${@}
 	echo -e "⚡️ Showing last $lines lines of logs for: ${CYAN}${service}${NC}"
-    print_separator
+	print_separator
 	journalctl -q -u "$service" -n "$lines" --no-pager
 	print_separator
 }
@@ -146,9 +146,9 @@ service_logs() {
 service_status() {
 	service_check ${@}
 	echo -e "⚡️ Service status for: ${CYAN}${service}${NC}"
-    print_separator
-    script -q -c "systemctl status ${service} --no-pager" /dev/null | sed '/^\s*└─/q'
-    stty sane # Restore terminal settings
+	print_separator
+	script -q -c "systemctl status ${service} --no-pager" /dev/null | sed '/^\s*└─/q'
+	stty sane # Restore terminal settings
 	print_separator
 }
 
@@ -191,14 +191,23 @@ wallet_init() {
 	fi
 }
 
+wallet_unlock() {
+	if [ "$(lncli state | grep LOCKED)" ]; then
+		echo "🔒 Wallet is locked. Attempting to unlock..."
+		if [ -f "$WALLET_PASSWORD" ]; then
+			lncli unlock --wallet-password-file "$WALLET_PASSWORD"
+		else
+			echo "Wallet password file missing. Unlock manually: lncli unlock"
+		fi
+	fi
+}
+
 wallet_state() {
-    if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
-        echo "🔒 No wallet.db file found. Make sure your wallet is properly initialized."
-        return 1
-    fi
-    if [ "$(lncli state | grep LOCKED)" ]; then
-        echo "🔒 Wallet is locked. Unlock manually with: lncli unlock"
-    fi
+	if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
+		echo "🔒 No wallet.db file found. Make sure your wallet is properly initialized."
+		return 1
+	fi
+	wallet_unlock
 }
 
 # Basic and working lit.conf to get started
@@ -340,19 +349,19 @@ lit_init() {
 
 # Convert macaroon to HEX
 macaroon_to_hex() {
-    local macaroon="${1:-admin}"
-    local macaroon="${macaroon%.*}"
-    local path="${LND_DIR}/data/chain/bitcoin/mainnet/${macaroon}.macaroon"
-    echo -e "⚡️ Convert ${CYAN}$macaroon${NC} macaroon to HEX"
-    print_separator
-    check_command xxd
-    if [ ! -f "${path}" ]; then
-        echo "No macaroon found at:"
-        echo " --> ${path}"
-    else
-        xxd -ps -u -c 1000 "${path}"
-    fi
-    print_separator
+	local macaroon="${1:-admin}"
+	local macaroon="${macaroon%.*}"
+	local path="${LND_DIR}/data/chain/bitcoin/mainnet/${macaroon}.macaroon"
+	echo -e "⚡️ Convert ${CYAN}$macaroon${NC} macaroon to HEX"
+	print_separator
+	check_command xxd
+	if [ ! -f "${path}" ]; then
+		echo "No macaroon found at:"
+		echo " --> ${path}"
+	else
+		xxd -ps -u -c 1000 "${path}"
+	fi
+	print_separator
 }
 
 # Generate strong passwords for Lit UI or Wallet
