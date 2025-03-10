@@ -1,6 +1,8 @@
 # SLi - Simply Lightning
 A versatile shell utility that simplifies Bitcoin Lightning Network packages management while offering a suite of handy tools for seamless node operations.
 
+![SLi Screenshot installing lit](https://0xee.li/media/sli-2025-03-10.png)
+
 SLi provides easy packages management for Lightning node operators, install, init, configure or update packages trough simple commands. Packages includes SLi and Lit (LND and Alby Hub are coming soon). It let you start/stop/reload daemons via systemd, quick edit of configuration files and provides some useful tools such as getting the HEX of macaroon.
 
 ## Examples
