@@ -8,7 +8,8 @@
 #
 sli_version="0.1.1"
 
-# Configurable Variables
+# --- Configurable Variables ---
+
 SLI_DIR="$HOME/.sli"
 LIT_DIR="$HOME/.lit"
 LIT_CONF="$LIT_DIR/lit.conf"
@@ -16,26 +17,25 @@ LND_DIR="$HOME/.lnd"
 WALLET_PASSWORD="$LND_DIR/wallet_password"
 EDITOR="nano"
 
-# Load custom conf
-[ -f "$SLI_DIR/sli.conf" ] && source ${SLI_DIR}/sli.conf
+# Load optional custom SLi config file
+[ -f "$SLI_DIR/sli.conf" ] && source "$SLI_DIR/sli.conf"
 
-#
-# Internal Variables
-#
-pkgs=${SLI_DIR}/packages
-cache=${SLI_DIR}/cache
-pkgs_list=${SLI_DIR}/packages.list
-pkgs_url="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
+# --- Global Variables ---
+
+INSTALLED_PKGS=${SLI_DIR}/packages
+CACHE_DIR=${SLI_DIR}/cache
+PKGS_LIST=${SLI_DIR}/packages.list
+PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 
 # Colors
-purple='\033[1;35m'
-cyan='\033[1;36m'
-yellow='\033[0;33m'
-red='\033[1;31m'
-nc='\033[0m' # No color
+PURPLE='\033[1;35m'
+CYAN='\033[1;36m'
+YELLOW='\033[0;33m'
+RED='\033[1;31m'
+NC='\033[0m' # No color
 
 #
-# Functions
+# --- Functions ---
 #
 
 # Display usage instructions (ident with space)
@@ -43,7 +43,7 @@ usage() {
 	cat << EOT
 Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
 $(separator)
-$(echo -e "${yellow}Commands:${nc}")
+$(echo -e "${YELLOW}Commands:${NC}")
   init               Initialize: sli lit wallet
   start              Start a deamon: litd
   stop               Stop a deamon: litd
@@ -51,11 +51,11 @@ $(echo -e "${yellow}Commands:${nc}")
   sc|show-config     Display config file: lit.conf
   ed|edit            Edit a config file: lit.conf
 
-$(echo -e "${yellow}Tools:${nc}")
+$(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
   gpw|gen-passwords  Gen new passwords for the wallet and Lit UI
 
-$(echo -e "${yellow}Packages Manager:${nc}")
+$(echo -e "${YELLOW}Packages Manager:${NC}")
   in|install         Install a package
   ls|list            List packages
   cc|clean-cache     Remove downloaded packges tarball
@@ -64,7 +64,7 @@ EOT
 }
 
 separator() {
-	echo -e "${purple}--------------------------------------------------------------------------------${nc}"
+	echo -e "${PURPLE}--------------------------------------------------------------------------------${NC}"
 }
 
 # Should be run at first usage - Self install ;-)
@@ -72,14 +72,14 @@ sli_init() {
 	pkg="sli"
 	echo "⚡️ SLi Initialization"
 	separator
-	echo -e "Creating data structure in: ${yellow}$SLI_DIR${nc}"
-	mkdir -p ${pkgs}/${pkg} ${SLI_DIR}/cache
-	echo -e "Storing curent SLi version: ${cyan}$sli_version${nc}"
-	echo "version=\"$sli_version\"" > ${pkgs}/${pkg}/pkg.conf
+	echo -e "Creating data structure in: ${YELLOW}$SLI_DIR${NC}"
+	mkdir -p ${INSTALLED_PKGS}/${pkg} ${CACHE_DIR}
+	echo -e "Storing curent SLi version: ${CYAN}$sli_version${NC}"
+	echo "version=\"$sli_version\"" > ${INSTALLED_PKGS}/${pkg}/pkg.conf
 	echo -e "Installing sli: /usr/local/bin/${pkg}"
 	sudo cp -f ${0} /usr/local/bin
-	echo "/usr/local/bin/sli" >  ${pkgs}/${pkg}/files.list
-	[ -f "$pkgs_list" ] || pkgs_get_list
+	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
+	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	separator
 }
 
@@ -97,7 +97,7 @@ service_check() {
 }
 
 start() {
-	service_check ${1}
+	service_check "$1" || return 1
 	echo "⚡️ Starting $service service..."
 	sudo systemctl start ${service}
 	wallet_state
@@ -119,17 +119,17 @@ reload() {
 }
 
 config_show() {
-	echo "⚡️ Configuration file for: ${cyan}$1${nc}"
+	echo -e "⚡️ Configuration file for: ${CYAN}$1${NC}"
 	separator
 	case "$1" in
 		lit)
 			if [ ! -f "$LIT_CONF" ]; then
-				echo -e "No config file, run --> sli init lit"
+				echo "No config file found. Please run 'sli init lit' to initialize."
 			else
 				cat ${LIT_CONF}
 			fi ;;
 		*)
-			echo -e "No config file for: ${cyan}$1${nc}" ;;
+			echo -e "No config file for: ${RED}$1${NC}" ;;
 	esac
 	separator
 }
@@ -153,14 +153,18 @@ wallet_init() {
 		lncli create
 	else
 		echo "A wallet database already exist:"
-		echo -e " --> ${yellow}$LND_DIR/data/chain/bitcoin/mainnet/wallet.db${nc}"
+		echo -e " --> ${YELLOW}$LND_DIR/data/chain/bitcoin/mainnet/wallet.db${NC}"
 	fi
 }
 
 wallet_state() {
-	if [ "$(lncli state | grep LOCKED)" ]; then
-		echo "🔒 Wallet is locked. Unlock manualy: lncli unlock"
-	fi
+    if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
+        echo "🔒 No wallet.db file found. Make sure your wallet is properly initialized."
+        return 1
+    fi
+    if [ "$(lncli state | grep LOCKED)" ]; then
+        echo "🔒 Wallet is locked. Unlock manually with: lncli unlock"
+    fi
 }
 
 # Basic and working lit.conf to get started
@@ -229,12 +233,12 @@ lit_install() {
 	if [ -n "$1" ]; then
 		lit_version="$1"
 	else
-		[ -f "$pkgs_list" ] || pkgs_get_list
-		lit_version=$(grep "^lit|" ${pkgs_list} | cut -d "|" -f 2)
+		[ -f "$PKGS_LIST" ] || pkgs_get_list
+		lit_version=$(grep "^lit|" ${PKGS_LIST} | cut -d "|" -f 2)
 	fi
 
 	# Set variables
-	pkg=${pkgs}/lit
+	pkg=${INSTALLED_PKGS}/lit
 	url="https://github.com/lightninglabs/lightning-terminal/releases/download/"
 	tarball="lightning-terminal-linux-amd64-${lit_version}.tar.gz"
 	litdir="lightning-terminal-linux-amd64-$lit_version"
@@ -245,13 +249,13 @@ lit_install() {
 	# Already installed ?
 	if [ -d ${pkg} ]; then
 		source ${pkg}/pkg.conf
-		echo -e "${cyan}Lit is already installed${nc}"
+		echo -e "${CYAN}Lit is already installed${NC}"
 		echo "Version: $version" && unset version
 		echo "" && exit 0
 	fi
 
 	# We work in Sli cache directory
-	mkdir -p ${pkg} ${cache} && cd ${cache}
+	mkdir -p ${pkg} ${CACHE_DIR} && cd ${CACHE_DIR}
 
 	pkg_download_tarball ${tarball} ${dlurl}
 
@@ -263,7 +267,7 @@ lit_install() {
 	tar xzf ${tarball}
 
 	# Install to /usr/local/bin
-	echo -e "${cyan}Install path: /usr/local/bin${nc}"
+	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	rm -f ${pkg}/files.list # Let's track installed files
 	for bin in $(ls $litdir); do
 		echo " * Installing: $bin"
@@ -274,10 +278,11 @@ lit_install() {
 
 	# Systemd service
 	if [ ! -f /etc/systemd/system/litd.service ]; then
-		echo -e "${cyan}Creating systemd service file:${nc} litd.service"
+		echo -e "${CYAN}Creating systemd service file:${NC} litd.service"
 		lit_service_file > litd.service
 		sudo mv litd.service /etc/systemd/system/
 		echo "/etc/systemd/system/litd.service" >> ${pkg}/files.list
+		sudo systemctl daemon-reload
 	fi
 }
 
@@ -286,17 +291,17 @@ lit_init() {
 	echo "⚡️ Lit Initialization"
 	separator
 	if [ ! -f "$LIT_CONF" ]; then
-		echo -e "Creating config file: ${yellow}$LIT_CONF${nc}"
+		echo -e "Creating config file: ${YELLOW}$LIT_CONF${NC}"
 		mkdir -p ${HOME}/.lit && touch ${LIT_CONF}
 		lit_config_file > ${LIT_CONF}
 	else
 		echo -e "Config file already exist:"
-		echo -e " --> ${yellow}$LIT_CONF${nc}"
+		echo -e " --> ${YELLOW}$LIT_CONF${NC}"
 	fi
 }
 
 #
-# Tools functions
+# --- Tools functions ---
 #
 
 # $ sli macaroon admin
@@ -313,6 +318,7 @@ macaroon_to_hex() {
 	if [ ! -x /usr/bin/xxd ]; then
 		echo "Please install: xxd"
 		echo "\$ apt install xxd"
+		exit 1
 	fi
 	if [ ! -f ${path}/${macaroon}.macaroon ]; then
 		echo "No macaroon found at:"
@@ -341,7 +347,7 @@ gen_passwords() {
 		echo "Lit UI --> ${ui_pwd}"
 	fi
 	echo ""
-	echo -e "${cyan}Write down your new password in a secure place!${nc}"
+	echo -e "${CYAN}Write down your new password in a secure place!${NC}"
 	echo ""
 	read -p "Do you wish to change Wallet password ? (yes/no) " change
 	if [ "$change" == "yes" ]; then
@@ -350,8 +356,8 @@ gen_passwords() {
 		# Update a wallet_password file ?
 		if [ -f "$WALLET_PASSWORD" ]; then
 			echo "Updating: $WALLET_PASSWORD"
-			echo "${wallet_pwd}" > ${$WALLET_PASSWORD}
-			chmod 0600 ${$WALLET_PASSWORD}
+			echo "${wallet_pwd}" > "${WALLET_PASSWORD}"
+			chmod 0600 "${WALLET_PASSWORD}"
 		fi
 	fi
 	unset change && echo ""
@@ -371,32 +377,32 @@ gen_passwords() {
 }
 
 #
-# Packages Manager functions
+# --- Packages Manager functions ---
 #
 
 # Download pkg if needed
 pkg_download_tarball() {
-	if [ ! -f ${cache}/${tarball} ]; then
+	if [ ! -f ${CACHE_DIR}/${tarball} ]; then
 		echo "Downloading: $tarball"
-		wget -q ${dlurl} || $(echo "ERROR" && exit 1)
+		wget -q ${dlurl} || { echo "Error downloading: ${tarball}"; exit 1; }
 	else
 		echo "Using cache: ${tarball}"
 	fi
 }
 
 pkgs_get_list() {
-	mkdir -p ${cache} && cd ${cache}
+	mkdir -p ${CACHE_DIR} && cd ${CACHE_DIR}
 	echo "Getting packages list from GitHub..."
-	wget -q ${pkgs_url} || exit 1
+	wget -q ${PKGS_URL} || exit 1
 	mv -f packages.list ${SLI_DIR}
 }
 
 pkgs_list() {
 	echo "⚡️ Installed packages"
 	separator
-	[ -d "$pkgs" ] || mkdir ${pkgs}
-	for pkg in $(ls ${pkgs}); do
-		source ${pkgs}/${pkg}/pkg.conf
+	[ -d "$INSTALLED_PKGS" ] || mkdir ${INSTALLED_PKGS}
+	for pkg in $(ls ${INSTALLED_PKGS}); do
+		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
 		echo "$pkg $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
 		unset version
 	done
@@ -405,8 +411,8 @@ pkgs_list() {
 	echo "⚡️ Available packages"
 	separator
 	# Ensure packages.list was downloaded
-	[ -f "$pkgs_list" ] || pkgs_get_list
-	for pkg in $(cat ${pkgs_list}); do
+	[ -f "$PKGS_LIST" ] || pkgs_get_list
+	for pkg in $(cat ${PKGS_LIST}); do
 		name=$(echo $pkg | cut -d "|" -f 1)
 		version=$(echo $pkg | cut -d "|" -f 2)
 		echo "$name $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
@@ -417,24 +423,24 @@ pkgs_list() {
 # Remove system files keep config/data in ~/.*
 pkg_remove() {
 	pkg="$1"
-	if [ ! -d ${pkgs}/${pkg} ]; then
-		echo -e "Can't find package: ${red}$pkg${nc}"
+	if [ ! -d ${INSTALLED_PKGS}/${pkg} ]; then
+		echo -e "Can't find package: ${RED}$pkg${NC}"
 		echo "" && exit 1
 	fi
 	echo "⚡️ Removing package: $pkg"
 	separator
-	for file in $(cat ${pkgs}/${pkg}/files.list); do
+	for file in $(cat ${INSTALLED_PKGS}/${pkg}/files.list); do
 		echo " * Removing: $file"
 		sudo rm -f ${file}
 	done
-	rm -rf ${pkgs}/${pkg}
+	rm -rf ${INSTALLED_PKGS}/${pkg}
 	separator
 }
 
 #
-# Commands handler
+# --- Handle Command ---
 #
-commands_handler() {
+handle_command() {
 	case "$1" in
 	
 		init)
@@ -466,7 +472,7 @@ commands_handler() {
 			config_edit ${2} ;;
 	
 		#
-		# Tools
+		# --- Tools ---
 		#
 	
 		m2h|macaroon-to-hex)
@@ -476,10 +482,14 @@ commands_handler() {
 			gen_passwords ${@} ;;
 	
 		#
-		# Packages manager
+		# --- Packages manager ---
 		#
 	
 		'in'|install)
+			if [ "$2" == "sli" ]; then
+				echo "SLi will self update" 
+				echo "" && exit 0
+			fi
 			if [ $(declare -F ${2}_install) ]; then
 				${2}_install ${3} # $3 = version
 				separator
@@ -498,8 +508,8 @@ commands_handler() {
 			;;
 	
 		cc|clean-cache)
-			echo "Removing cache content..."
-			rm -rf ${cache}/* ;;
+			echo "Removing cache directory content..."
+			rm -rf ${CACHE_DIR}/* ;;
 	
 		rm|remove)
 			pkg_remove ${2} ;;
@@ -512,6 +522,6 @@ commands_handler() {
 
 # Let's have default empty line for all actions
 echo ""
-commands_handler ${@}
+handle_command ${@}
 echo ""
 exit 0
