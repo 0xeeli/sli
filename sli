@@ -42,7 +42,7 @@ NC='\033[0m' # No color
 usage() {
 	cat << EOT
 Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
-$(separator)
+$(print_separator)
 $(echo -e "${YELLOW}Commands:${NC}")
   init               Initialize: sli lit wallet
   start              Start a deamon: litd
@@ -63,15 +63,23 @@ $(echo -e "${YELLOW}Packages Manager:${NC}")
 EOT
 }
 
-separator() {
+print_separator() {
 	echo -e "${PURPLE}--------------------------------------------------------------------------------${NC}"
+}
+
+# Check if a command is available
+check_command() {
+	if ! command -v "$1" >/dev/null 2>&1; then
+		echo -e "Error: ${RED}$1${NC} is required but not installed."
+		exit 1
+	fi
 }
 
 # Should be run at first usage - Self install ;-)
 sli_init() {
 	pkg="sli"
 	echo "⚡️ SLi Initialization"
-	separator
+	print_separator
 	echo -e "Creating data structure in: ${YELLOW}$SLI_DIR${NC}"
 	mkdir -p ${INSTALLED_PKGS}/${pkg} ${CACHE_DIR}
 	echo -e "Storing curent SLi version: ${CYAN}$sli_version${NC}"
@@ -80,7 +88,7 @@ sli_init() {
 	sudo cp -f ${0} /usr/local/bin
 	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
-	separator
+	print_separator
 }
 
 # Let user use lit in place of litd
@@ -120,7 +128,7 @@ reload() {
 
 config_show() {
 	echo -e "⚡️ Configuration file for: ${CYAN}$1${NC}"
-	separator
+	print_separator
 	case "$1" in
 		lit)
 			if [ ! -f "$LIT_CONF" ]; then
@@ -131,7 +139,7 @@ config_show() {
 		*)
 			echo -e "No config file for: ${RED}$1${NC}" ;;
 	esac
-	separator
+	print_separator
 }
 
 config_edit() {
@@ -245,7 +253,7 @@ lit_install() {
 	dlurl=${url}${lit_version}/${tarball}
 
 	echo "⚡️ Installing: Lightning Terminal $lit_version"
-	separator
+	print_separator
 	# Already installed ?
 	if [ -d ${pkg} ]; then
 		source ${pkg}/pkg.conf
@@ -289,7 +297,7 @@ lit_install() {
 # Initialize LiTd
 lit_init() {
 	echo "⚡️ Lit Initialization"
-	separator
+	print_separator
 	if [ ! -f "$LIT_CONF" ]; then
 		echo -e "Creating config file: ${YELLOW}$LIT_CONF${NC}"
 		mkdir -p ${HOME}/.lit && touch ${LIT_CONF}
@@ -304,35 +312,27 @@ lit_init() {
 # --- Tools functions ---
 #
 
-# $ sli macaroon admin
+# Convert macaroon to HEX
 macaroon_to_hex() {
-	path="$LND_DIR/data/chain/bitcoin/mainnet"
-	echo "⚡️ Macaroon to HEX"
-	separator
-	if [ -n "$1" ]; then
-		macaroon="$1"
-	else
-		macaroon="admin" # Default to admin
-	fi
-	# We need xxd installed
-	if [ ! -x /usr/bin/xxd ]; then
-		echo "Please install: xxd"
-		echo "\$ apt install xxd"
-		exit 1
-	fi
-	if [ ! -f ${path}/${macaroon}.macaroon ]; then
-		echo "No macaroon found at:"
-		echo " --> ${path}/${macaroon}.macaroon"
-	else
-		xxd -ps -u -c 1000 ${path}/${macaroon}.macaroon
-	fi
-	separator
+    local macaroon="${1:-admin}"
+    local macaroon="${macaroon%.*}"
+    local path="${LND_DIR}/data/chain/bitcoin/mainnet/${macaroon}.macaroon"
+    echo -e "⚡️ Convert ${CYAN}$macaroon${NC} macaroon to HEX"
+    print_separator
+    check_command xxd
+    if [ ! -f "${path}" ]; then
+        echo "No macaroon found at:"
+        echo " --> ${path}"
+    else
+        xxd -ps -u -c 1000 "${path}"
+    fi
+    print_separator
 }
 
 # Generate strong passwords for Lit UI or Wallet
 gen_passwords() {
 	echo "⚡️ Gen Passwords with: pwgen or openssl"
-	separator
+	print_separator
 	echo ""
 	# Prefer pwgen who include special characters
 	if [ -x /usr/bin/pwgen ] && [ "$2" != "openssl" ]; then
@@ -373,7 +373,7 @@ gen_passwords() {
 		fi
 	fi
 	unset wallet_pwd ui_pwd
-	echo "" && separator
+	echo "" && print_separator
 }
 
 #
@@ -399,17 +399,17 @@ pkgs_get_list() {
 
 pkgs_list() {
 	echo "⚡️ Installed packages"
-	separator
+	print_separator
 	[ -d "$INSTALLED_PKGS" ] || mkdir ${INSTALLED_PKGS}
 	for pkg in $(ls ${INSTALLED_PKGS}); do
 		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
 		echo "$pkg $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
 		unset version
 	done
-	separator
+	print_separator
 	echo ""
 	echo "⚡️ Available packages"
-	separator
+	print_separator
 	# Ensure packages.list was downloaded
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	for pkg in $(cat ${PKGS_LIST}); do
@@ -417,7 +417,7 @@ pkgs_list() {
 		version=$(echo $pkg | cut -d "|" -f 2)
 		echo "$name $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
 	done
-	separator
+	print_separator
 }
 
 # Remove system files keep config/data in ~/.*
@@ -428,13 +428,13 @@ pkg_remove() {
 		echo "" && exit 1
 	fi
 	echo "⚡️ Removing package: $pkg"
-	separator
+	print_separator
 	for file in $(cat ${INSTALLED_PKGS}/${pkg}/files.list); do
 		echo " * Removing: $file"
 		sudo rm -f ${file}
 	done
 	rm -rf ${INSTALLED_PKGS}/${pkg}
-	separator
+	print_separator
 }
 
 #
@@ -448,7 +448,7 @@ handle_command() {
 			case "$2" in
 				wallet)
 					echo "⚡️ Wallet Initialization"
-					separator
+					print_separator
 					wallet_init ;;
 				lit)
 					lit_init ;;
@@ -492,7 +492,7 @@ handle_command() {
 			fi
 			if [ $(declare -F ${2}_install) ]; then
 				${2}_install ${3} # $3 = version
-				separator
+				print_separator
 			else
 				echo "No package named: $2"
 			fi ;;
