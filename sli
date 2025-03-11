@@ -99,53 +99,30 @@ sli_init() {
 	print_separator
 }
 
-pkg_check_installed() {
-	# Already installed ?
-	pkg="$1"
-	if [ -d ${INSTALLED_PKGS}/${pkg} ]; then
-		available="$(grep "^${pkg}|" ${PKGS_LIST} | cut -d "|" -f 2)"
-		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
-		# Upgrade or custom version ?
-		if [ "$version" == "$available" ]; then
-			echo -e "${CYAN}$pkg is already installed${NC}"
-			echo "Version: $version" && unset version
-			echo "" && exit 0
-		fi
-	fi
-}
-
 # Used for upgrade, we keep main branch for now since we have control
-# packages.list to modify versions.
+# on packages.list to modify versions.
 sli_install() {
-	sli_version="$(grep "^sli|" ${PKGS_LIST} | cut -d "|" -f 2)"
-	pkg_data=${INSTALLED_PKGS}/sli
-	url="https://github.com/0xeeli/sli/archive/refs/heads/"
-	tarball="main.zip"
-	src_dir="sli-main"
-	dlurl=${url}/${tarball}
 	
-	echo "⚡️ Installing: SLi $sli_version"
-	print_separator
-	pkg_check_installed "sli"
-	# We work in Sli cache directory
-	mkdir -p ${pkg} ${CACHE_DIR} && cd ${CACHE_DIR}
+	PKG_NAME="sli"
+	SRC_URL="https://github.com/0xeeli/sli/archive/refs/heads"
+	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	TARBALL="main.zip"
+	SRC_DIR="sli-main"
+	DL_URL=${SRC_URL}/${TARBALL}
 
-	pkg_download_tarball ${tarball} ${dlurl}
-
-	# Record version
-	echo "version=\"$sli_version\"" > ${pkg_data}/pkg.conf
-	
-	# Extract
-	#echo "Extracting: $tarball"
-	unzip ${tarball}
+	# Pre install
+	pkg_pre_install "sli" "$PKG_VERSION"
+	pkg_download_tarball
+	pkg_extract_tarball
 
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
-	rm -f ${pkg_data}/files.list # Let's track installed files
 	echo " * Installing: sli"
-	sudo cp -f ${src_dir}/sli /usr/local/bin
-	echo "/usr/local/bin/sli" > ${pkg_data}/files.list
-	rm -rf ${src_dir}
+	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
+	echo "/usr/local/bin/sli" > ${PKG_DATA}/files.list
+	
+	# Post install
+	pkg_post_install
 }
 
 # Let user use lit in place of litd
@@ -281,6 +258,10 @@ wallet_db_exist() {
 	esac
 }
 
+#
+# --- Packages function: init + install + config files ---
+#
+
 # Basic and working lit.conf to get started
 lit_config_file() {
 	cat << EOT
@@ -344,55 +325,36 @@ EOT
 
 # Lightning Terminal install function
 lit_install() {
-	# Set custom version ?
-	if [ -n "$1" ]; then
-		lit_version="$1"
-	else
-		[ -f "$PKGS_LIST" ] || pkgs_get_list
-		lit_version=$(grep "^lit|" ${PKGS_LIST} | cut -d "|" -f 2)
-	fi
+	
+	PKG_NAME="lit"
+	SRC_URL="https://github.com/lightninglabs/lightning-terminal/releases/download"
+	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	TARBALL="lightning-terminal-linux-amd64-${PKG_VERSION}.tar.gz"
+	SRC_DIR="lightning-terminal-linux-amd64-${PKG_VERSION}"
+	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
 
-	# Set variables
-	pkg_data=${INSTALLED_PKGS}/lit
-	url="https://github.com/lightninglabs/lightning-terminal/releases/download/"
-	tarball="lightning-terminal-linux-amd64-${lit_version}.tar.gz"
-	src_dir="lightning-terminal-linux-amd64-$lit_version"
-	dlurl=${url}${lit_version}/${tarball}
-
-	echo "⚡️ Installing: Lightning Terminal $lit_version"
-	print_separator
-	pkg_check_installed "lit"
-
-	# We work in Sli cache directory
-	mkdir -p ${pkg_data} ${CACHE_DIR} && cd ${CACHE_DIR}
-
-	pkg_download_tarball ${tarball} ${dlurl}
-
-	# Record version
-	echo "version=\"$lit_version\"" > ${pkg_data}/pkg.conf
-
-	# Extract
-	echo "Extracting: $tarball"
-	tar xzf ${tarball}
+	# Pre install
+	pkg_pre_install "lit" "$PKG_VERSION"
+	pkg_download_tarball
+	pkg_extract_tarball
 
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
-	rm -f ${pkg_data}/files.list # Let's track installed files
-	for bin in $(ls $src_dir); do
+	for bin in $(ls $SRC_DIR); do
 		echo " * Installing: $bin"
-		sudo cp -f ${src_dir}/${bin} /usr/local/bin
-		echo "/usr/local/bin/$bin" >> ${pkg_data}/files.list
+		sudo cp -f ${SRC_DIR}/${bin} /usr/local/bin
+		echo "/usr/local/bin/$bin" >> ${PKG_DATA}/files.list
 	done
-	rm -rf ${src_dir}
 
 	# Systemd service
 	if [ ! -f /etc/systemd/system/litd.service ]; then
 		echo -e "${CYAN}Creating systemd service file:${NC} litd.service"
 		lit_service_file > litd.service
 		sudo mv litd.service /etc/systemd/system/
-		echo "/etc/systemd/system/litd.service" >> ${pkg_data}/files.list
+		echo "/etc/systemd/system/litd.service" >> ${PKG_DATA}/files.list
 		sudo systemctl daemon-reload
 	fi
+	pkg_post_install
 }
 
 # Initialize LiTd
@@ -464,6 +426,32 @@ lit_init() {
 		echo "Wallet auto-unlock is enabled"
 	fi
 }
+
+# lndconnect - https://github.com/LN-Zap/lndconnect
+lndconnect_install() {
+	
+	PKG_NAME="lndconnect"
+	SRC_URL="https://github.com/LN-Zap/lndconnect/releases/download/"
+	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
+	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
+	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
+	
+	# Pre install
+	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
+	pkg_download_tarball
+	pkg_extract_tarball
+	
+	# Install to /usr/local/bin
+	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
+	echo " * Installing: ${PKG_NAME}"
+	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
+	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
+	
+	# Post install
+	pkg_post_install
+}
+
 
 #
 # --- Tools functions ---
@@ -571,14 +559,27 @@ password_init() {
 # --- Packages Manager functions ---
 #
 
+pkg_get_version() {
+	grep "^${1}|" ${PKGS_LIST} | cut -d "|" -f 2
+}
+
 # Download pkg if needed
 pkg_download_tarball() {
-	if [ ! -f ${CACHE_DIR}/${tarball} ]; then
-		echo "Downloading: $tarball"
-		wget -q ${dlurl} || { echo "Error downloading: ${tarball}"; exit 1; }
+	if [ ! -f ${CACHE_DIR}/${TARBALL} ]; then
+		echo "Downloading: $TARBALL"
+		wget -q ${DL_URL} || { echo "Error downloading: ${TARBALL}"; exit 1; }
 	else
-		echo "Using cache: ${tarball}"
+		echo "Using cache: ${TARBALL}"
 	fi
+}
+
+pkg_extract_tarball() {
+	echo "Extracting: $TARBALL"
+	case "$TARBALL" in
+		*.tar.gz) tar xzf ${TARBALL} ;;
+		*.tar.bz2) tar xjf ${TARBALL} ;;
+		*.zip) unzip ${TARBALL} ;;
+	esac
 }
 
 pkgs_get_list() {
@@ -597,6 +598,38 @@ pkgs_get_list() {
 	else
 		echo "The packages list was fetch less than 4h ago."
 	fi
+}
+
+# Before install: called in pkg install function, ie lit_install
+pkg_pre_install() {
+	PKG_NAME="$1"
+	PKG_VERSION="$2"
+	PKG_DATA=${INSTALLED_PKGS}/${PKG_NAME}
+	# Already installed ?
+	if [ -f "${PKG_DATA}/pkg.conf" ]; then
+		# Set version=
+		source ${PKG_DATA}/pkg.conf
+		# Upgrade or custom version ?
+		if [ "$version" == "$PKG_VERSION" ]; then
+			echo -e "${CYAN}$PKG_NAME is already installed${NC}"
+			echo "Version: $version" && unset version
+			echo "" && exit 0
+		fi
+	fi
+	echo "⚡️ Installing: $PKG_NAME $PKG_VERSION"
+	print_separator
+	# Continuing for install/upgrade - We work in Sli cache directory
+	mkdir -p ${PKG_DATA} ${CACHE_DIR} && cd ${CACHE_DIR}
+	# Keep track of previous installed files
+	mv -f ${PKG_DATA}/files.list ${PKG_DATA}/files.list.old 2>/dev/null
+}
+
+# After install
+pkg_post_install() {
+	# Record version & clean cache
+	echo "version=\"$PKG_VERSION\"" > ${PKG_DATA}/pkg.conf
+	rm -rf ${SRC_DIR}
+	unset PKG_NAME SRC_URL PKG_VERSION TARBALL SRC_DIR DL_URL
 }
 
 pkgs_list() {
