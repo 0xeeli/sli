@@ -60,7 +60,8 @@ $(echo -e "${YELLOW}Tools:${NC}")
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
   in|install         Install a package
-  ls|list            List packages
+  up|upgrade         Upgrade installed packages
+  ls|list            List installed and available packages
   cc|clean-cache     Remove downloaded packges tarball
   rm|remove          Remove a package
 EOT
@@ -96,6 +97,55 @@ sli_init() {
 	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	print_separator
+}
+
+pkg_check_installed() {
+	# Already installed ?
+	pkg="$1"
+	if [ -d ${INSTALLED_PKGS}/${pkg} ]; then
+		available="$(grep "^${pkg}|" ${PKGS_LIST} | cut -d "|" -f 2)"
+		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
+		# Upgrade or custom version ?
+		if [ "$version" == "$available" ]; then
+			echo -e "${CYAN}$pkg is already installed${NC}"
+			echo "Version: $version" && unset version
+			echo "" && exit 0
+		fi
+	fi
+}
+
+# Used for upgrade, we keep main branch for now since we have control
+# packages.list to modify versions.
+sli_install() {
+	sli_version="$(grep "^sli|" ${PKGS_LIST} | cut -d "|" -f 2)"
+	pkg_data=${INSTALLED_PKGS}/sli
+	url="https://github.com/0xeeli/sli/archive/refs/heads/"
+	tarball="main.zip"
+	src_dir="sli-main"
+	dlurl=${url}/${tarball}
+	
+	echo "⚡️ Installing: SLi $sli_version"
+	print_separator
+	pkg_check_installed "sli"
+	# We work in Sli cache directory
+	mkdir -p ${pkg} ${CACHE_DIR} && cd ${CACHE_DIR}
+
+	pkg_download_tarball ${tarball} ${dlurl}
+
+	# Record version
+	echo "version=\"$sli_version\"" > ${pkg_data}/pkg.conf
+	
+	# Extract
+	#echo "Extracting: $tarball"
+	unzip ${tarball}
+
+	# Install to /usr/local/bin
+	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
+	rm -f ${pkg_data}/files.list # Let's track installed files
+	echo " * Installing: sli"
+	sudo cp -f ${src_dir}/sli /usr/local/bin
+	echo "/usr/local/bin/sli" > ${pkg_data}/files.list
+	rm -rf ${src_dir}
 }
 
 # Let user use lit in place of litd
@@ -294,7 +344,7 @@ EOT
 
 # Lightning Terminal install function
 lit_install() {
-	# Custom version ?
+	# Set custom version ?
 	if [ -n "$1" ]; then
 		lit_version="$1"
 	else
@@ -303,29 +353,23 @@ lit_install() {
 	fi
 
 	# Set variables
-	pkg=${INSTALLED_PKGS}/lit
+	pkg_data=${INSTALLED_PKGS}/lit
 	url="https://github.com/lightninglabs/lightning-terminal/releases/download/"
 	tarball="lightning-terminal-linux-amd64-${lit_version}.tar.gz"
-	litdir="lightning-terminal-linux-amd64-$lit_version"
+	src_dir="lightning-terminal-linux-amd64-$lit_version"
 	dlurl=${url}${lit_version}/${tarball}
 
 	echo "⚡️ Installing: Lightning Terminal $lit_version"
 	print_separator
-	# Already installed ?
-	if [ -d ${pkg} ]; then
-		source ${pkg}/pkg.conf
-		echo -e "${CYAN}Lit is already installed${NC}"
-		echo "Version: $version" && unset version
-		echo "" && exit 0
-	fi
+	pkg_check_installed "lit"
 
 	# We work in Sli cache directory
-	mkdir -p ${pkg} ${CACHE_DIR} && cd ${CACHE_DIR}
+	mkdir -p ${pkg_data} ${CACHE_DIR} && cd ${CACHE_DIR}
 
 	pkg_download_tarball ${tarball} ${dlurl}
 
 	# Record version
-	echo "version=\"$lit_version\"" > ${pkg}/pkg.conf
+	echo "version=\"$lit_version\"" > ${pkg_data}/pkg.conf
 
 	# Extract
 	echo "Extracting: $tarball"
@@ -333,20 +377,20 @@ lit_install() {
 
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
-	rm -f ${pkg}/files.list # Let's track installed files
-	for bin in $(ls $litdir); do
+	rm -f ${pkg_data}/files.list # Let's track installed files
+	for bin in $(ls $src_dir); do
 		echo " * Installing: $bin"
-		sudo cp -f ${litdir}/${bin} /usr/local/bin
-		echo "/usr/local/bin/$bin" >> ${pkg}/files.list
+		sudo cp -f ${src_dir}/${bin} /usr/local/bin
+		echo "/usr/local/bin/$bin" >> ${pkg_data}/files.list
 	done
-	rm -rf ${litdir}
+	rm -rf ${src_dir}
 
 	# Systemd service
 	if [ ! -f /etc/systemd/system/litd.service ]; then
 		echo -e "${CYAN}Creating systemd service file:${NC} litd.service"
 		lit_service_file > litd.service
 		sudo mv litd.service /etc/systemd/system/
-		echo "/etc/systemd/system/litd.service" >> ${pkg}/files.list
+		echo "/etc/systemd/system/litd.service" >> ${pkg_data}/files.list
 		sudo systemctl daemon-reload
 	fi
 }
@@ -539,9 +583,20 @@ pkg_download_tarball() {
 
 pkgs_get_list() {
 	mkdir -p ${CACHE_DIR} && cd ${CACHE_DIR}
-	echo "Getting packages list from GitHub..."
-	wget -q ${PKGS_URL} || exit 1
-	mv -f packages.list ${SLI_DIR}
+	
+	# Get the local packages.list last modification and compare
+	local_date=$(stat -c %Y "${SLI_DIR}/packages.list")
+	current_date=$(date +%s)
+	diff=$((CURRENT_TIME - LOCAL_MOD_TIME))
+
+	# Check if the file is older than 24 hours
+	if [ "$diff" -gt 14400 ]; then
+		echo "Getting packages list from GitHub..."
+		wget -q ${PKGS_URL} || exit 1
+		mv -f packages.list ${SLI_DIR}
+	else
+		echo "The packages list was fetch less than 4h ago."
+	fi
 }
 
 pkgs_list() {
@@ -565,6 +620,47 @@ pkgs_list() {
 		echo "$name $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
 	done
 	print_separator
+}
+
+# Downlad a packages.list, compare installed version to the list
+# upgrade everything
+pkgs_upgrade() {
+	echo "⚡️ Packages Upgrade"
+	print_separator
+	pkgs_get_list
+	echo "Checking for packages update..."
+	echo ""
+	# Simply check if version differ and upgrade since packages.list is
+	# maintained by OxeeLi GitHub repos it sould be fine.
+	for pkg in $(ls $INSTALLED_PKGS); do
+		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
+		available="$(grep "^${pkg}|" ${PKGS_LIST} | cut -d "|" -f 2)"
+		if [ "$version" != "$available" ]; then
+			echo -e "$pkg ${CYAN}$version${NC} --> ${GREEN}$available${NC}"
+			# We want to upgrade SLi at first
+			if [ "$pkg" == "sli" ]; then
+				upgrades="$pkg $upgrades"
+			else
+				upgrades="$ugrades $pkg"
+			fi
+		fi
+		unset version available
+	done
+	nb=$(echo ${upgrades} | wc -w)
+	if [ "$nb" -gt "0" ]; then
+		echo ""
+		read -p "Do you wich to upgrade $nb packages ? (yes/no) " up
+		if [ "$up" == "yes" ]; then
+			echo ""
+			for pkg in ${upgrades}; do
+				if [ $(declare -F ${pkg}_install) ]; then
+					${pkg}_install
+				fi
+			done
+		fi
+	else
+		echo -e "${CYAN}Packages are up-to-date.${NC}"
+	fi
 }
 
 # Remove system files keep config/data in ~/.*
@@ -638,11 +734,7 @@ handle_command() {
 			pkgs_list ;;
 	
 		up|upgrade)
-			# Downlad a packages.list, compare installed version to the list
-			# upgrade everything
-			pkgs_get_list
-			#pkgs_upgarde
-			;;
+			pkgs_upgrade ;;
 	
 		cc|clean-cache)
 			echo "Removing cache directory content..."
