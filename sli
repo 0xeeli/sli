@@ -27,6 +27,9 @@ CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 
+# SLi Wallet
+SLIWA_LOG="${SLI_DIR/sliwa.log}"
+
 # Colors
 PURPLE='\033[1;35m'
 CYAN='\033[1;36m'
@@ -57,6 +60,7 @@ $(echo -e "${YELLOW}Commands:${NC}")
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
   gpw|gen-passwords  Gen new passwords for the wallet and Lit UI
+  wa|wallet          Run 'sli wa' to display usage
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
   in|install         Install a package
@@ -64,6 +68,16 @@ $(echo -e "${YELLOW}Packages Manager:${NC}")
   ls|list            List installed and available packages
   cc|clean-cache     Remove downloaded packges tarball
   rm|remove          Remove a package
+EOT
+}
+
+wallet_usage() {
+	cat << EOT
+Usage: $(basename $0) [wa|wallet] <action>
+$(print_separator)
+  new       Create a ₿TC onchain address
+  lsaddr    List onchain wallet addresses
+  send      Send ₿TC onchain
 EOT
 }
 
@@ -75,9 +89,12 @@ print_separator() {
 check_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		echo -e "Error: ${RED}$1${NC} is required but not installed."
-		exit 1
+		echo "" && exit 1
 	fi
 }
+
+# Log events for SLi Wallet
+log_action() { echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log"; }
 
 #
 # --- Core Functions ---
@@ -223,8 +240,16 @@ config_edit() {
 	esac
 }
 
+#
+# --- Wallet Tools and Functions ---
+#
+
 # Create a wallet if none
 wallet_init() {
+	if [ "$1" == "--header" ]; then
+		echo "⚡️ Wallet Initialization"
+		print_separator
+	fi
 	if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
 		echo -e "Launching: ${GREEN}lncli create${NC}"
 		echo "🔒 Paste your generated or own Wallet password"
@@ -256,6 +281,38 @@ wallet_db_exist() {
 			# If Core lighning is implemented ;-)
 			echo "Core lighning" ;;
 	esac
+}
+
+wallet_new_address() {
+	check_command "jq"
+	echo "⚡️ New ₿TC Address for onchain funds (p2wkh)"
+	print_separator
+	addr=$(lncli newaddress p2wkh | jq -r '.address')
+	echo "New ₿TC address: $addr"
+	log_action "Created BTC onchain address: $addr"
+	print_separator
+}
+
+wallet_list_addresses() {
+	check_command "jq"
+	echo "⚡️ Onchain ₿TC Addresses"
+	print_separator
+	# Exclude addresses without funds ?
+	#lncli wallet addresses list | jq -r '.account_with_addresses[].addresses[] | select(.balance != "0") | "\(.address) \(.balance)"'
+	lncli wallet addresses list | jq -r '.account_with_addresses[].addresses[] | "\(.address) \(.balance)"'
+	print_separator
+}
+
+# Let send some sats
+wallet_send_onchain() {
+	echo "💰 Send ₿TC Onchain (Amount in sat)"
+	print_separator && echo ""
+	read -p "Address: " addr
+	read -p "Amount : " amt
+	if [ -n "$addr" ] && [ -n "$amt" ]; then
+		lncli sendcoins --addr="$addr" --amount="$amt"
+		log_action "Sent $amt sats to $addr"
+	fi
 }
 
 #
@@ -451,7 +508,6 @@ lndconnect_install() {
 	# Post install
 	pkg_post_install
 }
-
 
 #
 # --- Tools functions ---
@@ -722,14 +778,9 @@ handle_command() {
 		init)
 			# Initialization
 			case "$2" in
-				wallet)
-					echo "⚡️ Wallet Initialization"
-					print_separator
-					wallet_init ;;
-				lit)
-					lit_init ;;
-				*)
-					sli_init ;;
+				wallet) wallet_init "--header" ;;
+				lit) lit_init ;;
+				*) sli_init ;;
 			esac ;;
 	
 		start) service_start ${@} ;;
@@ -739,6 +790,19 @@ handle_command() {
 		ed|edit) config_edit ${2} ;;
 		lg|logs) service_logs ${@} ;;
 		st|status) service_status ${@} ;;
+		
+		#
+		# --- Wallet Management ---
+		#
+		
+		wa|wallet)
+			case "$2" in
+				init) wallet_init "--header" ;;
+				new) wallet_new_address ;;
+				lsaddr) wallet_list_addresses ;;
+				send) wallet_send_onchain ;;
+				*) wallet_usage ;;
+			esac ;;
 	
 		#
 		# --- Tools ---
