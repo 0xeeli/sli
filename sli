@@ -6,7 +6,8 @@
 #
 # (c) 2025 0xeeLi - MIT License
 #
-sli_version="0.1.1"
+sli_version="0.1"
+
 
 # --- Configurable Variables ---
 
@@ -14,6 +15,7 @@ SLI_DIR="$HOME/.sli"
 LIT_DIR="$HOME/.lit"
 LIT_CONF="$LIT_DIR/lit.conf"
 LND_DIR="$HOME/.lnd"
+LND_CONF="$LND_DIR/lnd.conf"
 WALLET_PASS="$LND_DIR/wallet.pass"
 EDITOR="nano"
 
@@ -91,6 +93,7 @@ $(print_separator)
 EOT
 }
 
+# Try to make pretty outputs!
 print_separator() {
 	echo -e "${PURPLE}--------------------------------------------------------------------------------${NC}"
 }
@@ -98,12 +101,12 @@ print_separator() {
 # Check if a command is available
 check_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
-		echo -e "Error: ${RED}$1${NC} is required but not installed."
+		echo -e " ✘ Error: ${RED}$1${NC} is required but not installed."
 		echo "" && exit 1
 	fi
 }
 
-# Log events for SLi Wallet
+# Log events for SLi Wallet aka SLiWa ;-)
 log_action() { echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log"; }
 
 #
@@ -123,13 +126,15 @@ sli_init() {
 	sudo cp -f ${0} /usr/local/bin
 	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
+	# Create an empty sli.conf to let user customize some variables ???
+	#touch ${SLI_DIR}/sli.conf
 	print_separator
 }
 
 # Used for upgrade, we keep main branch for now since we have control
 # on packages.list to modify versions.
 sli_install() {
-	
+
 	PKG_NAME="sli"
 	SRC_URL="https://github.com/0xeeli/sli/archive/refs/heads"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
@@ -147,7 +152,7 @@ sli_install() {
 	echo " * Installing: sli"
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo "/usr/local/bin/sli" > ${PKG_DATA}/files.list
-	
+
 	# Post install
 	pkg_post_install
 }
@@ -155,7 +160,7 @@ sli_install() {
 # Let user use lit in place of litd
 service_check() {
 	if [ -z "$2" ]; then
-		echo "Missing service name. Usage: sli $1 <service>"
+		echo " ✘ Missing service name. Usage: sli $1 <service>"
 		echo "" && exit 1
 	fi
 	if [ "$2" == "lit" ]; then
@@ -189,6 +194,7 @@ service_stop() {
 service_restart() {
 	service_check "$@" || return 1
 	echo "⚡️ Restarting $service service..."
+	# sudo systemctl restart ${service} : Not always working with litd
 	sudo systemctl stop ${service}
 	sleep 2
 	sudo systemctl start ${service}
@@ -215,6 +221,16 @@ service_status() {
 	print_separator
 }
 
+# Show config file if any
+config_show_file() {
+	if [ ! -f "$1" ]; then
+		echo " ✘ No config file found. Try 'sli init <pkg>' to initialize."
+	else
+		cat "$1"
+	fi
+}
+
+# Set config file path
 config_show() {
 	if [ ! -n "$1" ]; then
 		echo -e "Usage: $(basename $0) show-config <pkg>\n" && exit 0
@@ -222,31 +238,33 @@ config_show() {
 	echo -e "⚡️ Configuration file for: ${CYAN}$1${NC}"
 	print_separator
 	case "$1" in
-		lit)
-			if [ ! -f "$LIT_CONF" ]; then
-				echo "No config file found. Please run 'sli init lit' to initialize."
-			else
-				cat ${LIT_CONF}
-			fi ;;
-		*)
-			echo -e "No config file for: ${RED}$1${NC}" ;;
+		lit) config_show_file "$LIT_CONF" ;;
+		lnd) config_show_file "$LND_CONF" ;;
+		sli) config_show_file "$SLI_CONF" ;;
+		*) echo -e " ✘ No config file for: ${RED}$1${NC}" ;;
 	esac
 	print_separator
 }
 
+# Edit config if any. User can customize EDITOR with ~/.sli/sli.conf
+config_edit_file() {
+	if [ ! -f "$1" ]; then
+		echo " ✘ No config file found: Try 'sli init <pkg>' to initialize."
+	else
+		${EDITOR} ${1}
+	fi
+}
+
+# Set config file path for editing
 config_edit() {
 	if [ ! -n "$1" ]; then
 		echo -e "Usage: $(basename $0) edit <pkg>\n" && exit 0
 	fi
 	case "$1" in
-		lit)
-			if [ ! -f "$LIT_CONF" ]; then
-				echo "No config file, run --> sli init lit"
-			else
-				${EDITOR} ${LIT_CONF}
-			fi ;;
-		*)
-			echo "No config file for: $1" ;;
+		lit) config_edit_file "$LIT_CONF" ;;
+		lnd) config_edit_file "$LND_CONF" ;;
+		sli) config_edit_file "$SLI_CONF" ;;
+		*) echo " ✘ No config file for: $1" ;;
 	esac
 }
 
@@ -275,7 +293,7 @@ wallet_info() {
 	if [ "$(lncli state | grep LOCKED)" ]; then
 		echo "🔒 Wallet is locked."
 	else
-		echo "🔒 Wallet is unlocked."
+		echo "🔓 Wallet is unlocked."
 	fi
 }
 
@@ -293,6 +311,7 @@ wallet_db_exist() {
 	esac
 }
 
+# Create a new onchain wallet
 wallet_new_address() {
 	check_command "jq"
 	echo "⚡️ New ₿TC Address for onchain funds (p2wkh)"
@@ -303,6 +322,7 @@ wallet_new_address() {
 	print_separator
 }
 
+# Parse JSON output with jq to nicely display wallet(s) and show balance(s)
 wallet_list_addresses() {
 	check_command "jq"
 	echo "⚡️ Onchain ₿TC Addresses"
@@ -346,7 +366,7 @@ wallet() {
 		send) wallet_send_onchain ;;
 		opc|openchan) wallet_open_channel ;;
 		*) wallet_usage ;;
-	esac 
+	esac
 }
 
 #
@@ -419,7 +439,7 @@ EOT
 
 # Lightning Terminal install function
 lit_install() {
-	
+
 	PKG_NAME="lit"
 	SRC_URL="https://github.com/lightninglabs/lightning-terminal/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
@@ -523,25 +543,25 @@ lit_init() {
 
 # lndconnect - https://github.com/LN-Zap/lndconnect
 lndconnect_install() {
-	
+
 	PKG_NAME="lndconnect"
 	SRC_URL="https://github.com/LN-Zap/lndconnect/releases/download/"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
-	
+
 	# Pre install
 	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
 	pkg_download_tarball
 	pkg_extract_tarball
-	
+
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	echo " * Installing: ${PKG_NAME}"
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
-	
+
 	# Post install
 	pkg_post_install
 }
@@ -567,7 +587,7 @@ macaroon_to_hex() {
 	print_separator
 }
 
-# Generate strong passwords for Lit UI or Wallet. Prefer pwgen who 
+# Generate strong passwords for Lit UI or Wallet. Prefer pwgen who
 # include special characters
 passwords_gen() {
 	if [ -x /usr/bin/pwgen ] && [ "$1" != "openssl" ]; then
@@ -659,7 +679,7 @@ node_backup_check_path() {
 
 # Function to create a backup
 node_backup() {
-	
+
 	echo "⚡️ Creating Node Backup"
 	print_separator
 	# Ensure backup directory exists
@@ -683,7 +703,7 @@ node_backup() {
 	echo " * Encrypting backup..."
 	gpg --batch --yes --passphrase-file "$WALLET_PASS" -c "$BACKUP_FILE"
 	rm -f "$BACKUP_FILE"
-	
+
 	size=$(du -sh ${BACKUP_FILE}.gpg | cut -d "	" -f 1)
 	echo -e " ✔ Backup completed successfully: ${CYAN}${size}${NC}"
 	echo -e "Encrypted backup: ${YELLOW}$(basename ${BACKUP_FILE}.gpg)${NC}"
@@ -692,7 +712,7 @@ node_backup() {
 
 # Function to restore a backup
 node_backup_restore() {
-	
+
 	node_backup_check_path "$2"
 	echo "⚡️ Restoring Node Backup"
 	print_separator
@@ -720,7 +740,7 @@ node_backup_restore() {
 
 # Function to extract a backup for inspection
 node_backup_extract() {
-	
+
 	node_backup_check_path "$2"
 	echo "⚡️ Extracting Node Backup"
 	print_separator
@@ -753,7 +773,7 @@ pkg_get_version() {
 pkg_download_tarball() {
 	if [ ! -f ${CACHE_DIR}/${TARBALL} ]; then
 		echo "Downloading: $TARBALL"
-		wget -q ${DL_URL} || { echo "Error downloading: ${TARBALL}"; exit 1; }
+		wget -q ${DL_URL} || { echo " ✘ Error downloading: ${TARBALL}"; exit 1; }
 	else
 		echo "Using cache: ${TARBALL}"
 	fi
@@ -770,7 +790,7 @@ pkg_extract_tarball() {
 
 pkgs_get_list() {
 	mkdir -p ${CACHE_DIR} && cd ${CACHE_DIR}
-	
+
 	# Get the local packages.list last modification and compare
 	local_date=$(stat -c %Y "${SLI_DIR}/packages.list")
 	current_date=$(date +%s)
@@ -886,7 +906,7 @@ pkgs_upgrade() {
 pkg_remove() {
 	pkg="$1"
 	if [ ! -d ${INSTALLED_PKGS}/${pkg} ]; then
-		echo -e "Can't find package: ${RED}$pkg${NC}"
+		echo -e " ✘ Can't find package: ${RED}$pkg${NC}"
 		echo "" && exit 1
 	fi
 	echo "⚡️ Removing package: $pkg"
@@ -904,7 +924,7 @@ pkg_remove() {
 #
 handle_command() {
 	case "$1" in
-	
+
 		init)
 			# Initialization
 			case "$2" in
@@ -912,58 +932,50 @@ handle_command() {
 				lit) lit_init ;;
 				*) sli_init ;;
 			esac ;;
-	
+
 		start) service_start ${@} ;;
-		stop) service_stop ${@} ;;	
+		stop) service_stop ${@} ;;
 		rs|restart) service_restart ${@} ;;
 		sc|show-config) config_show ${2} ;;
 		ed|edit) config_edit ${2} ;;
 		lg|logs) service_logs ${@} ;;
 		st|status) service_status ${@} ;;
-		
+
 		#
 		# --- Tools ---
 		#
-	
+
 		m2h|macaroon-to-hex) macaroon_to_hex ${2} ;;
 		gpw|gen-passwords) passwords_change ${@} ;;
 		nb|node-backup) node_backup ;;
 		nr|node-restore) node_backup_restore ${@} ;;
 		ne|node-extract) node_backup_extract ${@} ;;
 		wa|wallet) wallet ${@} ;;
-		
-	
+
 		#
 		# --- Packages manager ---
 		#
-	
+
 		'in'|install)
 			if [ "$2" == "sli" ]; then
-				echo "If you need to reinstall this version, run: sli init" 
+				echo "If you need to reinstall this version, run: sli init"
 				echo "" && exit 0
 			fi
 			if [ $(declare -F ${2}_install) ]; then
-				${2}_install ${3} # $3 = version
+				${2}_install
 				print_separator
 			else
 				echo "No package named: $2"
 			fi ;;
-	
-		ls|list)
-			pkgs_list ;;
-	
-		up|upgrade)
-			pkgs_upgrade ;;
-	
+
+		ls|list) pkgs_list ;;
+		up|upgrade) pkgs_upgrade ;;
+		rm|remove) pkg_remove ${2} ;;
 		cc|clean-cache)
 			echo "Removing cache directory content..."
 			rm -rf ${CACHE_DIR}/* ;;
-	
-		rm|remove)
-			pkg_remove ${2} ;;
-	
-		*)
-			usage ;;
+
+		*) usage ;;
 	esac
 }
 
