@@ -4,7 +4,7 @@
 # Lightning Network packages management while offering a suite of handy
 # tools for seamless node operations.
 #
-# (c) 2025 0xeeLi - MIT License
+# (c) 2025 0xeeLi ⚡️ MIT License
 #
 sli_version="0.1"
 
@@ -221,6 +221,40 @@ service_status() {
 	print_separator
 }
 
+# Used by package install to generate a secure systemd unit
+config_service_unit() {
+	service_unit="${1}.service"
+	service_desc="$2"
+	if [ ! -f /etc/systemd/system/${service_unit} ]; then
+		echo -e "${CYAN}Creating systemd service file:${NC} ${service_unit}"
+		cat << EOF | sudo tee /etc/systemd/system/${service_unit} > /dev/null
+[Unit]
+Description=${service_desc}
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/${1}
+User=$USER
+Type=simple
+Restart=always
+RestartSec=60
+LimitNOFILE=8192
+PrivateTmp=true
+ProtectSystem=strict
+NoNewPrivileges=true
+MemoryDenyWriteExecute=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+		# Track installed file
+		echo "/etc/systemd/system/${service_unit}" >> ${PKG_DATA}/files.list
+		sudo systemctl daemon-reload
+		#sudo systemctl enable ${1}
+	fi
+}
+
 # Show config file if any
 config_show_file() {
 	if [ ! -f "$1" ]; then
@@ -415,28 +449,6 @@ lnd.bitcoin.dnsseed=nodes.lightning.directory,soa.nodes.lightning.directory
 EOT
 }
 
-# Lit Systemd service set to current $USER
-lit_service_file() {
-	cat << EOT
-[Unit]
-Description=Lightning Terminal (LIT)
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/litd
-User=$USER
-Restart=always
-RestartSec=60
-LimitNOFILE=8192
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-
-[Install]
-WantedBy=multi-user.target
-EOT
-	#sudo systemctl enable litd
-}
-
 # Lightning Terminal install function
 lit_install() {
 
@@ -455,19 +467,16 @@ lit_install() {
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	for bin in $(ls $SRC_DIR); do
-		echo " * Installing: $bin"
-		sudo cp -f ${SRC_DIR}/${bin} /usr/local/bin
-		echo "/usr/local/bin/$bin" >> ${PKG_DATA}/files.list
+		# Handle conflict with loop, pool and friends
+		if ! command -v "$bin" >/dev/null 2>&1; then
+			echo " * Installing: $bin"
+			sudo cp -f ${SRC_DIR}/${bin} /usr/local/bin
+			echo "/usr/local/bin/$bin" >> ${PKG_DATA}/files.list
+		fi
 	done
 
 	# Systemd service
-	if [ ! -f /etc/systemd/system/litd.service ]; then
-		echo -e "${CYAN}Creating systemd service file:${NC} litd.service"
-		lit_service_file > litd.service
-		sudo mv litd.service /etc/systemd/system/
-		echo "/etc/systemd/system/litd.service" >> ${PKG_DATA}/files.list
-		sudo systemctl daemon-reload
-	fi
+	config_service_unit "litd" "Lightning Terminal (LiT)"
 	pkg_post_install
 }
 
@@ -569,9 +578,12 @@ loop_install() {
 	
 	# Pool will conflict with LiT Bundle, prefer original version
 	if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list; then
-		echo -e " * ${CYAN}NOTE:${NC} Loop already installed by lit --> Keeping this build"
+		echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
 		sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
 	fi
+	
+	# Systemd service
+	config_service_unit "loopd" "Loopd Off/On Chain Bridge"
 	
 	echo "Documentation: https://lightning.engineering/loop/"
 	
@@ -610,6 +622,10 @@ pool_install() {
 		echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Keeping this build"
 		sed -i '/^\/usr\/local\/bin\/pool$/d' "${INSTALLED_PKGS}/lit/files.list"
 	fi
+	
+	# Systemd service. Do we realy want pool for everyone ? I mean
+	# experienced user will create the file by them self right ?
+	#config_service_unit "poold" "Lightning Pool Daemon"
 	
 	echo "Documentation: https://pool.lightning.engineering/"
 	
