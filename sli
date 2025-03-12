@@ -17,6 +17,12 @@ LND_DIR="$HOME/.lnd"
 WALLET_PASS="$LND_DIR/wallet.pass"
 EDITOR="nano"
 
+# Backup Configs
+BACKUP_DIR="$HOME/lnd-backup"
+WALLET_PASS="$LND_DIR/wallet.pass"
+TMP_BACKUP_DIR="$BACKUP_DIR/tmp"
+EXTRACTED_DIR="$BACKUP_DIR/extracted"
+
 # Load optional custom SLi config file
 [ -f "$SLI_DIR/sli.conf" ] && source "$SLI_DIR/sli.conf"
 
@@ -60,6 +66,9 @@ $(echo -e "${YELLOW}Commands:${NC}")
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
   gpw|gen-passwords  Gen new passwords for the wallet and Lit UI
+  nb|node-backup     Backup and encrypt your node
+  nr|node-restore    Restore a GPG encrypted backup file
+  ne|node-extract    Extract a GPG encrypted backup file
   wa|wallet          Run 'sli wa' to display usage
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
@@ -179,7 +188,7 @@ service_stop() {
 
 service_restart() {
 	service_check "$@" || return 1
-	echo "⚡️ Reloading $service service..."
+	echo "⚡️ Restarting $service service..."
 	sudo systemctl stop ${service}
 	sleep 2
 	sudo systemctl start ${service}
@@ -639,6 +648,99 @@ password_init() {
 	esac
 }
 
+# Check if a backup file was given
+node_backup_check_path() {
+	BACKUP_FILE="$1"
+	if [ -z "$BACKUP_FILE" ]; then
+		echo " ✘ Missing backup file path: $(basename $0) $1 <file.gpg>"
+		echo "" && exit 1
+	fi
+}
+
+# Function to create a backup
+node_backup() {
+	
+	echo "⚡️ Creating Node Backup"
+	print_separator
+	# Ensure backup directory exists
+	echo " * Preparing backup directories..."
+	mkdir -p "$BACKUP_DIR" "$TMP_BACKUP_DIR"
+
+	echo " * Exporting Static Channel Backup (SCB)..."
+	lncli exportchanbackup --all --output_file="$TMP_BACKUP_DIR/channel.backup"
+
+	echo " * Copying LND files to backup directory..."
+	cp -r "$LND_DIR" "$TMP_BACKUP_DIR/"
+
+	echo " * Creating tarball archive..."
+	TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+	BACKUP_FILE="$BACKUP_DIR/lnd_backup_$TIMESTAMP.tar.gz"
+	tar -czf "$BACKUP_FILE" -C "$TMP_BACKUP_DIR" .
+
+	echo " * Cleaning up temporary files..."
+	rm -rf "$TMP_BACKUP_DIR"
+
+	echo " * Encrypting backup..."
+	gpg --batch --yes --passphrase-file "$WALLET_PASS" -c "$BACKUP_FILE"
+	rm -f "$BACKUP_FILE"
+	
+	size=$(du -sh ${BACKUP_FILE}.gpg | cut -d "	" -f 1)
+	echo -e " ✔ Backup completed successfully: ${CYAN}${size}${NC}"
+	echo -e "Encrypted backup: ${YELLOW}$(basename ${BACKUP_FILE}.gpg)${NC}"
+	print_separator
+}
+
+# Function to restore a backup
+node_backup_restore() {
+	
+	node_backup_check_path "$2"
+	echo "⚡️ Restoring Node Backup"
+	print_separator
+	# Ensure backup directory exists
+	echo " * Preparing to restore backup..."
+	mkdir -p "$BACKUP_DIR" "$TMP_BACKUP_DIR"
+
+	echo -e " * Decrypting: ${YELLOW}$(basename $BACKUP_FILE)${NC}"
+	gpg --batch --yes --passphrase-file "$WALLET_PASS" \
+		-o "$TMP_BACKUP_DIR/lnd_backup.tar.gz" -d "$BACKUP_FILE"
+
+	echo " * Extracting backup..."
+	tar -xzf "$TMP_BACKUP_DIR/lnd_backup.tar.gz" -C "$TMP_BACKUP_DIR"
+
+	echo " * Restoring LND files..."
+	cp -r "$TMP_BACKUP_DIR/.lnd" "$HOME/"
+
+	echo " * Cleaning up temporary files..."
+	rm -rf "$TMP_BACKUP_DIR"
+
+	echo " ✔ Restore completed. "
+	echo -e "${CYAN}Restart LND/LiTd and unlock your wallet (if no auto-unlock).${NC}"
+	print_separator
+}
+
+# Function to extract a backup for inspection
+node_backup_extract() {
+	
+	node_backup_check_path "$2"
+	echo "⚡️ Extracting Node Backup"
+	print_separator
+	# Ensure backup directory exists
+	echo " * Preparing for extraction..."
+	mkdir -p "$BACKUP_DIR" "$EXTRACTED_DIR"
+
+	echo -e " * Decrypting: ${YELLOW}$(basename $BACKUP_FILE)${NC}"
+	gpg --batch --yes --passphrase-file "$WALLET_PASS" \
+		-o "$EXTRACTED_DIR/lnd_backup.tar.gz" -d "$BACKUP_FILE"
+
+	echo " * Extracting backup contents for inspection..."
+	tar -xzf "$EXTRACTED_DIR/lnd_backup.tar.gz" -C "$EXTRACTED_DIR"
+	rm -f "$EXTRACTED_DIR/lnd_backup.tar.gz"
+
+	echo " ✔ Backup extracted in: $EXTRACTED_DIR/lnd_backup"
+	echo -e "${CYAN}You can now inspect your files.${NC}"
+	print_separator
+}
+
 #
 # --- Packages Manager functions ---
 #
@@ -825,7 +927,11 @@ handle_command() {
 	
 		m2h|macaroon-to-hex) macaroon_to_hex ${2} ;;
 		gpw|gen-passwords) passwords_change ${@} ;;
+		nb|node-backup) node_backup ;;
+		nr|node-restore) node_backup_restore ${@} ;;
+		ne|node-extract) node_backup_extract ${@} ;;
 		wa|wallet) wallet ${@} ;;
+		
 	
 		#
 		# --- Packages manager ---
