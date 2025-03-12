@@ -73,11 +73,12 @@ EOT
 
 wallet_usage() {
 	cat << EOT
-Usage: $(basename $0) [wa|wallet] <action>
+Usage: $(basename $0) [wa|wallet] [command]
 $(print_separator)
-  new       Create a ₿TC onchain address
-  lsaddr    List onchain wallet addresses
-  send      Send ₿TC onchain
+  new         Create a ₿TC onchain address
+  lsaddr      List onchain wallet addresses
+  send        Send ₿TC onchain
+  openchan    Open a channel
 EOT
 }
 
@@ -315,6 +316,30 @@ wallet_send_onchain() {
 	fi
 }
 
+# Open a channel
+wallet_open_channel() {
+	echo "🔗 Open a Channel (Amount in sat)"
+	print_separator && echo ""
+	read -p "Node ID: " node
+	read -p "Amount : " amt
+	if [ -n "$node" ] && [ -n "$amt" ]; then
+		lncli openchannel --node_key="$node" --local_amt="$amt"
+		log_action "Opened channel with $node for $amt sats"
+	fi
+}
+
+# Handle Wallet commands
+wallet() {
+	case "$2" in
+		init) wallet_init "--header" ;;
+		new) wallet_new_address ;;
+		lsa|lsaddr) wallet_list_addresses ;;
+		send) wallet_send_onchain ;;
+		opc|openchan) wallet_open_channel ;;
+		*) wallet_usage ;;
+	esac 
+}
+
 #
 # --- Packages function: init + install + config files ---
 #
@@ -365,14 +390,17 @@ EOT
 lit_service_file() {
 	cat << EOT
 [Unit]
-Description=Litd Terminal Daemon
+Description=Lightning Terminal (LIT)
+After=network.target
 
 [Service]
 Type=simple
-Restart=always
-RestartSec=120
-ExecStart=/usr/local/bin/litd litd
+ExecStart=/usr/local/bin/litd
 User=$USER
+Restart=always
+RestartSec=60
+LimitNOFILE=8192
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
@@ -792,24 +820,12 @@ handle_command() {
 		st|status) service_status ${@} ;;
 		
 		#
-		# --- Wallet Management ---
-		#
-		
-		wa|wallet)
-			case "$2" in
-				init) wallet_init "--header" ;;
-				new) wallet_new_address ;;
-				lsaddr) wallet_list_addresses ;;
-				send) wallet_send_onchain ;;
-				*) wallet_usage ;;
-			esac ;;
-	
-		#
 		# --- Tools ---
 		#
 	
 		m2h|macaroon-to-hex) macaroon_to_hex ${2} ;;
 		gpw|gen-passwords) passwords_change ${@} ;;
+		wa|wallet) wallet ${@} ;;
 	
 		#
 		# --- Packages manager ---
