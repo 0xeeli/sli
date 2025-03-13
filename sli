@@ -6,8 +6,7 @@
 #
 # (c) 2025 0xeeLi ⚡️ MIT License
 #
-sli_version="0.1"
-
+sli_version="0.0.1"
 
 # --- Configurable Variables ---
 
@@ -46,6 +45,8 @@ RED='\033[1;31m'
 GREEN='\033[1;32m'
 NC='\033[0m' # No color
 
+# Emoji: 🔌 ⚡️ ✘ 🔒 💰 🔗 
+
 #
 # --- Helper Functions ---
 #
@@ -64,6 +65,7 @@ $(echo -e "${YELLOW}Commands:${NC}")
   ed|edit            Edit a config file: lit.conf
   lg|logs            Show last logs for a service (default: 30 lines)
   st|status          Show service status
+  nh|node-health     Node Health Check (Status, blocks, peers)
 
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
@@ -88,10 +90,13 @@ Usage: $(basename $0) [wa|wallet] [command]
 $(print_separator)
   new         Create a ₿TC onchain address
   lsaddr      List onchain wallet addresses
+  bal         Wallet balance
   send        Send ₿TC onchain
   openchan    Open a channel
 EOT
 }
+
+sli_version() { echo "SLi version: $sli_version"; }
 
 # Try to make pretty outputs!
 print_separator() {
@@ -102,12 +107,21 @@ print_separator() {
 check_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		echo -e " ✘ Error: ${RED}$1${NC} is required but not installed."
+		echo -e " * Try: sudo apt install $1  # On Debian/Ubuntu"
 		echo "" && exit 1
 	fi
 }
 
 # Log events for SLi Wallet aka SLiWa ;-)
-log_action() { echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log"; }
+log_action() {
+	local log_file="$SLI_DIR/sliwa.log"
+	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log"; 
+	# Rotate log if file exceeds 1MB
+	if [ $(stat -c %s "$log_file") -gt 1048576 ]; then
+		mv -f "$log_file" "$log_file.old"
+		touch "$log_file"
+	fi
+}
 
 #
 # --- Core Functions ---
@@ -123,7 +137,7 @@ sli_init() {
 	echo -e "Storing curent SLi version: ${CYAN}$sli_version${NC}"
 	echo "version=\"$sli_version\"" > ${INSTALLED_PKGS}/${pkg}/pkg.conf
 	echo -e "Installing sli: /usr/local/bin/${pkg}"
-	sudo cp -f ${0} /usr/local/bin
+	sudo cp -f ${0} /usr/local/bin 2>/dev/null
 	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	# Create an empty sli.conf to let user customize some variables ???
@@ -302,6 +316,24 @@ config_edit() {
 	esac
 }
 
+# TO IMPROVE
+# We check the files created by SLi
+security_check() {
+	echo "⚡️ Security Check on files created by SLi"
+	print_separator
+	for file in ${WALLET_PASS} ${LIT_CONF} ${LND_CONF}; do
+		# Ensure file exist before checking permissions
+		if [ -f "$file" ]; then
+			echo -en "Checking ${YELLOW}$(basename $file)${NC}:"
+			if [ "$(stat -c %a "$file")" == "600" ]; then
+				echo -e " permissions ${GREEN}0600${NC}"
+			else
+				echo " ✘ Security fix needed: chmod 0600 $file"
+			fi
+		fi
+	done
+}
+
 #
 # --- Wallet Tools and Functions ---
 #
@@ -367,6 +399,17 @@ wallet_list_addresses() {
 	print_separator
 }
 
+wallet_balance() {
+	check_command "jq"
+	echo "⚡️ Wallet Balances"
+	print_separator
+	echo "On-chain Balance:"
+	lncli walletbalance | jq -r '"\(.confirmed_balance) sat (confirmed) / \(.unconfirmed_balance) sat (unconfirmed)"'
+	echo -e "\nChannel Balance:"
+	lncli channelbalance | jq -r '"\(.balance) sat (local) / \(.remote_balance) sat (remote)"'
+	print_separator
+}
+
 # Let send some sats
 wallet_send_onchain() {
 	echo "💰 Send ₿TC Onchain (Amount in sat)"
@@ -376,6 +419,8 @@ wallet_send_onchain() {
 	if [ -n "$addr" ] && [ -n "$amt" ]; then
 		lncli sendcoins --addr="$addr" --amount="$amt"
 		log_action "Sent $amt sats to $addr"
+	else
+		echo " ✘ Address or amount missing."
 	fi
 }
 
@@ -397,6 +442,7 @@ wallet() {
 		init) wallet_init "--header" ;;
 		new) wallet_new_address ;;
 		lsa|lsaddr) wallet_list_addresses ;;
+		bal|balance) wallet_balance ;;
 		send) wallet_send_onchain ;;
 		opc|openchan) wallet_open_channel ;;
 		*) wallet_usage ;;
@@ -734,7 +780,7 @@ passwords_change() {
 password_init() {
 	case "$1" in
 		ui-password)
-			passwords_gen
+			passwords_gen "openssl"
 			echo ""
 			echo -e "${YELLOW}Lit UI pass -->${NC} ${ui_pwd}"
 			echo ""
@@ -745,7 +791,7 @@ password_init() {
 			sed -i s/"uipassword=.*"/"uipassword=${ui_pwd}"/ ${LIT_CONF}
 			unset ui_pwd ;;
 		wallet-password)
-			passwords_gen
+			passwords_gen "openssl"
 			echo ""
 			echo -e "${YELLOW}Wallet pass -->${NC} ${wallet_pwd}"
 			echo ""
@@ -853,6 +899,20 @@ node_backup_extract() {
 	print_separator
 }
 
+# To be improved if/when LND is integrated
+node_health() {
+	echo "⚡️ Node Health Check"
+	print_separator
+	echo "Service Status:"
+	systemctl is-active litd >/dev/null 2>&1 && echo -e " - litd: ${GREEN}Running${NC}" \
+		|| echo " - litd: ${RED}Stopped${NC}"
+	echo -e "\nSync Status:"
+	lncli getinfo | jq -r '" - Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
+	echo -e "\nConnected Peers:"
+	lncli listpeers | jq -r '.peers | length' | xargs echo " - Peers:"
+	print_separator
+}
+
 #
 # --- Packages Manager functions ---
 #
@@ -882,20 +942,9 @@ pkg_extract_tarball() {
 
 pkgs_get_list() {
 	mkdir -p ${CACHE_DIR} && cd ${CACHE_DIR}
-
-	# Get the local packages.list last modification and compare
-	local_date=$(stat -c %Y "${SLI_DIR}/packages.list")
-	current_date=$(date +%s)
-	diff=$((CURRENT_TIME - LOCAL_MOD_TIME))
-
-	# Check if the file is older than 24 hours
-	if [ "$diff" -gt 14400 ]; then
-		echo "Getting packages list from GitHub..."
-		wget -q ${PKGS_URL} || exit 1
-		mv -f packages.list ${SLI_DIR}
-	else
-		echo "The packages list was fetch less than 4h ago."
-	fi
+	echo "Fetching packages list from GitHub..."
+	wget -q ${PKGS_URL} || exit 1
+	mv -f packages.list ${SLI_DIR}
 }
 
 # Before install: called in pkg install function, ie lit_install
@@ -1016,7 +1065,8 @@ pkg_remove() {
 #
 handle_command() {
 	case "$1" in
-
+		
+		version|--version) sli_version ;;
 		init)
 			# Initialization
 			case "$2" in
@@ -1032,6 +1082,7 @@ handle_command() {
 		ed|edit) config_edit ${2} ;;
 		lg|logs) service_logs ${@} ;;
 		st|status) service_status ${@} ;;
+		nh|node-health) node_health ;;
 
 		#
 		# --- Tools ---
@@ -1043,6 +1094,7 @@ handle_command() {
 		nr|node-restore) node_backup_restore ${@} ;;
 		ne|node-extract) node_backup_extract ${@} ;;
 		wa|wallet) wallet ${@} ;;
+		sec|security-check) security_check ;;
 
 		#
 		# --- Packages manager ---
