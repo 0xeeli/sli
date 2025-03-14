@@ -88,11 +88,15 @@ wallet_usage() {
 	cat << EOT
 Usage: $(basename $0) [wa|wallet] [command]
 $(print_separator)
-  new         Create a ₿TC onchain address
-  lsaddr      List onchain wallet addresses
-  bal         Wallet balance
-  send        Send ₿TC onchain
-  openchan    Open a channel
+  new                 Create a ₿TC onchain address
+  send                Send ₿TC onchain
+  lsa|list-addresse   List onchain wallet addresses
+  bal|balance         Wallet balance
+  opc|open-channel    Open a channel
+  clc|close-channel   Close a channel
+  lsc|list-channels   List all channels
+  inv|invoice         Generate a Lightning invoice
+  pay|pay-invoice     Pay a Lightning invoice
 EOT
 }
 
@@ -416,6 +420,10 @@ wallet_send_onchain() {
 	print_separator && echo ""
 	read -p "Address: " addr
 	read -p "Amount : " amt
+	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
+		echo " ✘ Invalid amount: $amt. Must be numeric."
+		return 1
+	fi
 	if [ -n "$addr" ] && [ -n "$amt" ]; then
 		lncli sendcoins --addr="$addr" --amount="$amt"
 		log_action "Sent $amt sats to $addr"
@@ -436,15 +444,89 @@ wallet_open_channel() {
 	fi
 }
 
+# Close a channel cooperatively or forced
+wallet_close_channel() {
+    check_command "jq"
+    echo "🔗 Close a Lightning Channel"
+    print_separator
+    echo "Open channels:"
+    lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
+    echo ""
+    read -p "Channel Point (e.g., txid:output): " chan_point
+    read -p "Force close? (yes/no, default: no): " force
+    force=${force:-no}
+    if [ "$force" == "yes" ]; then
+        lncli closechannel --force "$chan_point"
+        log_action "Force-closed channel: $chan_point"
+    else
+        lncli closechannel "$chan_point"
+        log_action "Cooperatively closed channel: $chan_point"
+    fi
+    print_separator
+}
+
+# List open channels
+wallet_list_channels() {
+	check_command "jq"
+	echo "🔗 Open Lightning Channels"
+	print_separator
+	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Capacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
+	print_separator
+}
+
+# Generate interactively a Lightning invoice
+wallet_gen_invoice() {
+	echo "⚡️ Generate Lightning Invoice"
+	print_separator
+	read -p "Amount (sat, default: 1000): " amt
+	amt=${amt:-1000}
+	read -p "Memo (optional): " memo
+	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
+		echo " ✘ Invalid amount: $amt. Must be numeric."
+		return 1
+	fi
+	if [ -n "$memo" ]; then
+		invoice=$(lncli addinvoice --amt="$amt" --memo="$memo" | jq -r '.payment_request')
+	else
+		invoice=$(lncli addinvoice --amt="$amt" | jq -r '.payment_request')
+	fi
+	echo "Invoice: $invoice"
+	log_action "Generated invoice for $amt sat with memo: $memo"
+	print_separator
+}
+
+# Pay a Lightning invoice directly
+wallet_pay_invoice() {
+	echo "💸 Pay a Lightning Invoice"
+	print_separator
+	read -p "Invoice (bolt11): " invoice
+	if [ -n "$invoice" ]; then
+		result=$(lncli payinvoice --json "$invoice" | jq -r '.payment_error // "Success"')
+		if [ "$result" == "Success" ]; then
+			echo "✔ Payment successful"
+			log_action "Paid invoice: $invoice"
+		else
+			echo " ✘ Payment failed: $result"
+		fi
+	else
+		echo " ✘ No invoice provided"
+	fi
+	print_separator
+}
+
 # Handle Wallet commands
 wallet() {
 	case "$2" in
 		init) wallet_init "--header" ;;
 		new) wallet_new_address ;;
-		lsa|lsaddr) wallet_list_addresses ;;
-		bal|balance) wallet_balance ;;
 		send) wallet_send_onchain ;;
+		lsa|lsaddr|list-addresses) wallet_list_addresses ;;
+		bal|balance) wallet_balance ;;
 		opc|openchan) wallet_open_channel ;;
+		clc|close-channel) wallet_close_channel ;;
+		lsc|lschan|list-channels) wallet_list_channels ;;
+		inv|invoice) wallet_gen_invoice ;;
+		pay|pay-invoice) wallet_pay_invoice ;;
 		*) wallet_usage ;;
 	esac
 }
