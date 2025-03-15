@@ -6,7 +6,7 @@
 #
 # (c) 2025 0xeeLi ⚡️ MIT License
 #
-sli_version="0.1"
+sli_version="v0.1.0"
 
 # --- Configurable Variables ---
 
@@ -66,6 +66,7 @@ $(echo -e "${YELLOW}Commands:${NC}")
   lg|logs            Show last logs for a service (default: 30 lines)
   st|status          Show service status
   nh|node-health     Node Health Check (Status, blocks, peers)
+  sign               Sign message with your node private key
 
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
@@ -181,8 +182,8 @@ service_check() {
 		echo " ✘ Missing service name. Usage: sli $1 <service>"
 		echo "" && exit 1
 	fi
-	case "$1" in
-		lit|loop|pool) service="${1}d" ;;
+	case "$2" in
+		lit|loop|pool) service="${2}d" ;;
 		*) service="$2" ;;
 	esac
 }
@@ -339,6 +340,18 @@ security_check() {
 			fi
 		fi
 	done
+}
+
+# Sing a message in interactive mode by the node’s identity private key
+sign_message() {
+	echo "💬 Sing a message"
+	print_separator && echo ""
+	read -p "Message to sing: " message
+	echo -e "\n${CYAN}Signature:${NC}\n"
+	if [ -n "$message" ]; then
+		lncli signmessage "$message" | jq -r '.signature'
+	fi
+	echo "" && print_separator
 }
 
 #
@@ -1188,6 +1201,7 @@ handle_command() {
 		lg|logs) service_logs ${@} ;;
 		st|status) service_status ${@} ;;
 		nh|node-health) node_health ;;
+		sign) sign_message ;;
 
 		#
 		# --- Tools ---
