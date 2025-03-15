@@ -53,7 +53,7 @@ NC='\033[0m' # No color
 
 # Display usage instructions (ident with space)
 usage() {
-    cat << EOT
+	cat << EOT
 Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
 $(print_separator)
 $(echo -e "${YELLOW}Commands:${NC}")
@@ -75,9 +75,10 @@ $(echo -e "${YELLOW}Node Manager:${NC}")
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
   gpw|gen-passwords  Gen new passwords for the wallet and Lit UI
-  nb|node-backup     Backup and encrypt your node
+  nb|node-backup     Backup and encrypt your node (wallet include)
   nr|node-restore    Restore a GPG encrypted backup file
   ne|node-extract    Extract a GPG encrypted backup file
+  sec|security-check Check files permissions created by SLi
   wa|wallet          Run 'sli wa' for wallet operations
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
@@ -94,6 +95,7 @@ wallet_usage() {
 	cat << EOT
 Usage: $(basename $0) [wa|wallet] [command]
 $(print_separator)
+  init                Initialize the wallet if none exists
   logs                View Wallet logs
   new                 Create a ₿TC onchain address
   send                Send ₿TC onchain
@@ -106,23 +108,23 @@ EOT
 
 # Channel usage
 chan_usage() {
-    cat << EOT
+	cat << EOT
 Usage: $(basename $0) chan [command]
 $(print_separator)
-  opc|open    Open a channel
-  clc|close   Close a channel
-  lsc|list    List all channels
+  opc|open      Open a Lightning channel (prompts for node ID and amount)
+  clc|close     Close a Lightning channel (cooperative or forced)
+  lsc|list      List open Lightning channels with details
 EOT
 }
 
 # Fees usage
 fees_usage() {
-    cat << EOT
+	cat << EOT
 Usage: $(basename $0) fees [command]
 $(print_separator)
-  check       Check current fee policies (optional: <channel_point>)
-  set         Set fees interactively (global or specific channel)
-  adjust      Adjust fees dynamically based on traffic or balance
+  check        Check current fee policies (optional: <channel_point>)
+  set          Set fees interactively (global or specific channel)
+  adjust       Adjust fees dynamically based on traffic or balance
 EOT
 }
 
@@ -435,8 +437,12 @@ wallet_new_address() {
 	echo "⚡️ New ₿TC Address for onchain funds (p2wkh)"
 	print_separator
 	addr=$(lncli newaddress p2wkh | jq -r '.address')
-	echo "New ₿TC address: $addr"
-	log_action "Created BTC onchain address: $addr"
+	if [ -n "$addr" ]; then
+		echo "New ₿TC address: $addr"
+		log_action "Created BTC onchain address: $addr"
+	else
+		echo -e "${RED}Is your litd or lnd daemon running and wallet unlock ?${NC}"
+	fi
 	print_separator
 }
 
@@ -542,40 +548,133 @@ chan_open() {
 
 # Close a channel cooperatively or forced
 chan_close() {
-    check_command "jq"
-    echo "🔗 Close a Lightning Channel"
-    print_separator
-    echo "Open channels:"
-    lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
-    echo ""
-    read -p "Channel Point (e.g., txid:output): " chan_point
-    read -p "Force close? (yes/no, default: no): " force
-    force=${force:-no}
-    if [ "$force" == "yes" ]; then
-        lncli closechannel --force "$chan_point"
-        log_action "Force-closed channel: $chan_point"
-    else
-        lncli closechannel "$chan_point"
-        log_action "Cooperatively closed channel: $chan_point"
-    fi
-    print_separator
+	check_command "jq"
+	echo "🔗 Close a Lightning Channel"
+	print_separator
+	echo "Open channels:"
+	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
+	echo ""
+	read -p "Channel Point (e.g., txid:output): " chan_point
+	read -p "Force close? (yes/no, default: no): " force
+	force=${force:-no}
+	if [ "$force" == "yes" ]; then
+		lncli closechannel --force "$chan_point"
+		log_action "Force-closed channel: $chan_point"
+	else
+		lncli closechannel "$chan_point"
+		log_action "Cooperatively closed channel: $chan_point"
+	fi
+	print_separator
 }
 
 # List open channels
 chan_list() {
-    check_command "jq"
-    echo "🔗 Open Lightning Channels"
-    print_separator
-    lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Capacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
-    print_separator
+	check_command "jq"
+	echo "🔗 Open Lightning Channels"
+	print_separator
+	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Capacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
+	print_separator
 }
 
 #
 # --- Fees functions ---
 #
 
+# Check the current fees policy
+fees_check() {
+	check_command "jq"
+	echo "⚡️ Current Fee Policies"
+	print_separator
+	if [ -n "$1" ]; then
+		echo "Checking fees for channel: $1"
+		lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$1\") | .chan_id")" | \
+			jq -r '"Base Fee: \(.policy1.fee_base_msat) msat | Fee Rate: \(.policy1.fee_rate_ppm) ppm"'
+	else
+		echo "Listing fee policies for all open channels:"
+		lncli listchannels | jq -r '.channels[] | "Channel: \(.channel_point) | Base Fee: \(.local_policy.fee_base_msat) msat | Fee Rate: \(.local_policy.fee_rate_ppm) ppm"'
+	fi
+	print_separator
+}
 
+# Set routing fees
+fees_set() {
+	check_command "jq"
+	echo "⚡️ Set Routing Fees"
+	print_separator
+	echo "Options:"
+	echo " --> Leave blank for global settings (all channels)"
+	echo " --> Enter a channel point (e.g., txid:output) for a specific channel"
+	echo ""
+	read -p "Channel Point (optional): " chan_point
+	echo ""
+	echo "Suggested starting fees for new nodes:"
+	echo " --> Base Fee: 100 msat (0.1 sat)"
+	echo " --> Fee Rate: 200 ppm (0.02%)"
+	echo ""
+	read -p "Base Fee (msat, default: 100): " base_fee
+	base_fee=${base_fee:-100}
+	read -p "Fee Rate (ppm, default: 200): " fee_rate
+	fee_rate=${fee_rate:-200}
+	if ! [[ "$base_fee" =~ ^[0-9]+$ ]] || ! [[ "$fee_rate" =~ ^[0-9]+$ ]]; then
+		echo " ✘ Invalid input: Base Fee and Fee Rate must be numeric."
+		return 1
+	fi
+	fee_rate_decimal=$(echo "scale=6; $fee_rate / 1000000" | bc)
+	if [ -z "$chan_point" ]; then
+		echo "Applying globally: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
+		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --min_htlc_msat 1000 --time_lock_delta 40
+		#log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
+	else
+		echo "Applying to channel $chan_point: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
+		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
+		#log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
+	fi
+	echo "✔ Fees updated successfully."
+	print_separator
+}
 
+# Dynamically adjust fees
+fees_adjust() {
+	check_command "jq"
+	echo "⚡️ Dynamically Adjust Fees"
+	print_separator
+	echo "Select a channel to adjust:"
+	lncli listchannels | jq -r '.channels[] | "Channel: \(.channel_point) | Local: \(.local_balance) sat | Remote: \(.remote_balance.sat)"'
+	echo ""
+	read -p "Channel Point: " chan_point
+	if [ -z "$chan_point" ]; then
+		echo " ✘ Please specify a channel point."
+		return 1
+	fi
+	current_base=$(lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$chan_point\") | .chan_id")" | jq -r '.policy1.fee_base_msat')
+	current_rate=$(lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$chan_point\") | .chan_id")" | jq -r '.policy1.fee_rate_ppm')
+	echo "Current: Base Fee: $current_base msat | Fee Rate: $current_rate ppm"
+	echo ""
+	echo "${CYAN}Adjustment options:${NC}"
+	echo " --> Lower fees to boost traffic (e.g., halve current fees)"
+	echo " --> Raise fees to increase earnings or slow outbound liquidity drain"
+	echo ""
+	read -p "Action (lower/raise): " action
+	case "$action" in
+		lower)
+			new_base=$((current_base / 2))
+			new_rate=$((current_rate / 2)) ;;
+		raise)
+			new_base=$((current_base + 50))
+			new_rate=$((current_rate + 100)) ;;
+		*)
+			echo " ✘ Invalid action. Use 'lower' or 'raise'."
+			return 1 ;;
+	esac
+	new_rate_decimal=$(echo "scale=6; $new_rate / 1000000" | bc)
+	echo "Applying: Base Fee: $new_base msat | Fee Rate: $new_rate ppm"
+	lncli updatechanpolicy --base_fee_msat "$new_base" --fee_rate "$new_rate_decimal" \
+		--chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
+	# Use node.log ?
+	#log_action "Adjusted fees for $chan_point: Base $new_base msat, Rate $new_rate ppm ($action)"
+	echo "✔ Fees adjusted successfully."
+	print_separator
+}
 
 #
 # --- Packages function: init + install + config files ---
@@ -1198,42 +1297,43 @@ pkg_remove() {
 
 # Handle channel commands
 chan() {
-    case "$2" in
-        opc|open) chan_open ;;
-        clc|close) chan_close ;;
-        lsc|list) chan_list ;;
-        *) chan_usage ;;
-    esac
+	case "$2" in
+		opc|open) chan_open ;;
+		clc|close) chan_close ;;
+		lsc|list) chan_list ;;
+		*) chan_usage ;;
+	esac
 }
 
 # Handle fees commands
 fees() {
-    case "$2" in
-        check) fees_check "$3" ;;
-        'set') fees_set ;;
-        adjust) fees_adjust ;;
-        *) fees_usage ;;
-    esac
+	case "$2" in
+		check) fees_check "$3" ;;
+		'set') fees_set ;;
+		adjust) fees_adjust ;;
+		*) fees_usage ;;
+	esac
 }
 
 # Handle Wallet commands
 wallet() {
-    case "$2" in
-        init) wallet_init "--header" ;;
-        logs) wallet_logs ;;
-        new) wallet_new_address ;;
-        send) wallet_send_onchain ;;
-        lsa|lsaddr|list-addresses) wallet_list_addresses ;;
-        bal|balance) wallet_balance ;;
-        inv|invoice) wallet_gen_invoice ;;
-        pay|pay-invoice) wallet_pay_invoice ;;
-        *) wallet_usage ;;
-    esac
+	case "$2" in
+		init) wallet_init "--header" ;;
+		logs) wallet_logs ;;
+		new) wallet_new_address ;;
+		send) wallet_send_onchain ;;
+		lsa|lsaddr|list-addresses) wallet_list_addresses ;;
+		bal|balance) wallet_balance ;;
+		inv|invoice) wallet_gen_invoice ;;
+		pay|pay-invoice) wallet_pay_invoice ;;
+		*) wallet_usage ;;
+	esac
 }
 
 #
 # --- Handle Top Level Commands ---
 #
+
 handle_command() {
 	case "$1" in
 
@@ -1253,8 +1353,16 @@ handle_command() {
 		ed|edit) config_edit ${2} ;;
 		lg|logs) service_logs ${@} ;;
 		st|status) service_status ${@} ;;
+
+		#
+		# --- Node ---
+		#
+
 		nh|node-health) node_health ;;
 		sign) sign_message ;;
+		chan) chan ${@} ;;
+		fees) fees ${@} ;;
+
 
 		#
 		# --- Tools ---
@@ -1262,10 +1370,7 @@ handle_command() {
 
 		m2h|macaroon-to-hex) macaroon_to_hex ${2} ;;
 		gpw|gen-passwords) passwords_change ${@} ;;
-		nb|node-backup) node_backup ;;
-		nr|node-restore) node_backup_restore ${@} ;;
-		ne|node-extract) node_backup_extract ${@} ;;
-		wa|wallet) handle_wallet ${@} ;;
+		wa|wallet) wallet ${@} ;;
 		sec|security-check) security_check ;;
 
 		#
