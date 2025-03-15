@@ -53,20 +53,24 @@ NC='\033[0m' # No color
 
 # Display usage instructions (ident with space)
 usage() {
-	cat << EOT
+    cat << EOT
 Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
 $(print_separator)
 $(echo -e "${YELLOW}Commands:${NC}")
   init               Initialize: sli lit wallet
-  start              Start a deamon: litd
-  stop               Stop a deamon: litd
-  rs|restart         Restart a deamon: litd
+  start              Start a daemon: litd
+  stop               Stop a daemon: litd
+  rs|restart         Restart a daemon: litd
   sc|show-config     Display config file: lit.conf
   ed|edit            Edit a config file: lit.conf
   lg|logs            Show last logs for a service (default: 30 lines)
   st|status          Show service status
+
+$(echo -e "${YELLOW}Node Manager:${NC}")
   nh|node-health     Node Health Check (Status, blocks, peers)
   sign               Sign message with your node private key
+  chan               Channel management (open, close, list)
+  fees               Fee management (check, set, adjust)
 
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
@@ -74,17 +78,18 @@ $(echo -e "${YELLOW}Tools:${NC}")
   nb|node-backup     Backup and encrypt your node
   nr|node-restore    Restore a GPG encrypted backup file
   ne|node-extract    Extract a GPG encrypted backup file
-  wa|wallet          Run 'sli wa' to display usage
+  wa|wallet          Run 'sli wa' for wallet operations
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
   in|install         Install a package
   up|upgrade         Upgrade installed packages
   ls|list            List installed and available packages
-  cc|clean-cache     Remove downloaded packges tarball
+  cc|clean-cache     Remove downloaded packages tarball
   rm|remove          Remove a package
 EOT
 }
 
+# Wallet usage
 wallet_usage() {
 	cat << EOT
 Usage: $(basename $0) [wa|wallet] [command]
@@ -94,11 +99,30 @@ $(print_separator)
   send                Send ₿TC onchain
   lsa|list-addresse   List onchain wallet addresses
   bal|balance         Wallet balance
-  opc|open-channel    Open a channel
-  clc|close-channel   Close a channel
-  lsc|list-channels   List all channels
   inv|invoice         Generate a Lightning invoice
   pay|pay-invoice     Pay a Lightning invoice
+EOT
+}
+
+# Channel usage
+chan_usage() {
+    cat << EOT
+Usage: $(basename $0) chan [command]
+$(print_separator)
+  opc|open    Open a channel
+  clc|close   Close a channel
+  lsc|list    List all channels
+EOT
+}
+
+# Fees usage
+fees_usage() {
+    cat << EOT
+Usage: $(basename $0) fees [command]
+$(print_separator)
+  check       Check current fee policies (optional: <channel_point>)
+  set         Set fees interactively (global or specific channel)
+  adjust      Adjust fees dynamically based on traffic or balance
 EOT
 }
 
@@ -456,49 +480,6 @@ wallet_send_onchain() {
 	fi
 }
 
-# Open a channel
-wallet_open_channel() {
-	echo "🔗 Open a Channel (Amount in sat)"
-	print_separator && echo ""
-	read -p "Node ID: " node
-	read -p "Amount : " amt
-	if [ -n "$node" ] && [ -n "$amt" ]; then
-		#--connect="${node}@{host}"
-		lncli openchannel --node_key="$node" --local_amt="$amt"
-		log_action "Opened channel with $node for: $amt sats"
-	fi
-}
-
-# Close a channel cooperatively or forced
-wallet_close_channel() {
-	check_command "jq"
-	echo "🔗 Close a Lightning Channel"
-	print_separator
-	echo "Open channels:"
-	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
-	echo ""
-	read -p "Channel Point (e.g., txid:output): " chan_point
-	read -p "Force close? (yes/no, default: no): " force
-	force=${force:-no}
-	if [ "$force" == "yes" ]; then
-		lncli closechannel --force "$chan_point"
-		log_action "Force-closed channel: $chan_point"
-	else
-		lncli closechannel "$chan_point"
-		log_action "Cooperatively closed channel: $chan_point"
-	fi
-	print_separator
-}
-
-# List open channels
-wallet_list_channels() {
-	check_command "jq"
-	echo "🔗 Open Lightning Channels"
-	print_separator
-	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Capacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
-	print_separator
-}
-
 # Generate interactively a Lightning invoice
 wallet_gen_invoice() {
 	check_command "jq"
@@ -542,23 +523,59 @@ wallet_pay_invoice() {
 	print_separator
 }
 
-# Handle Wallet commands
-wallet() {
-	case "$2" in
-		init) wallet_init "--header" ;;
-		logs) wallet_logs ;;
-		new) wallet_new_address ;;
-		send) wallet_send_onchain ;;
-		lsa|lsaddr|list-addresses) wallet_list_addresses ;;
-		bal|balance) wallet_balance ;;
-		opc|openchan) wallet_open_channel ;;
-		clc|close-channel) wallet_close_channel ;;
-		lsc|lschan|list-channels) wallet_list_channels ;;
-		inv|invoice) wallet_gen_invoice ;;
-		pay|pay-invoice) wallet_pay_invoice ;;
-		*) wallet_usage ;;
-	esac
+#
+# --- Channel functions ---
+#
+
+# Open a channel
+chan_open() {
+	echo "🔗 Open a Channel (Amount in sat)"
+	print_separator && echo ""
+	read -p "Node ID: " node
+	read -p "Amount : " amt
+	if [ -n "$node" ] && [ -n "$amt" ]; then
+		#--connect="${node}@{host}"
+		lncli openchannel --node_key="$node" --local_amt="$amt"
+		log_action "Opened channel with $node for: $amt sats"
+	fi
 }
+
+# Close a channel cooperatively or forced
+chan_close() {
+    check_command "jq"
+    echo "🔗 Close a Lightning Channel"
+    print_separator
+    echo "Open channels:"
+    lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
+    echo ""
+    read -p "Channel Point (e.g., txid:output): " chan_point
+    read -p "Force close? (yes/no, default: no): " force
+    force=${force:-no}
+    if [ "$force" == "yes" ]; then
+        lncli closechannel --force "$chan_point"
+        log_action "Force-closed channel: $chan_point"
+    else
+        lncli closechannel "$chan_point"
+        log_action "Cooperatively closed channel: $chan_point"
+    fi
+    print_separator
+}
+
+# List open channels
+chan_list() {
+    check_command "jq"
+    echo "🔗 Open Lightning Channels"
+    print_separator
+    lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Capacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
+    print_separator
+}
+
+#
+# --- Fees functions ---
+#
+
+
+
 
 #
 # --- Packages function: init + install + config files ---
@@ -1178,8 +1195,44 @@ pkg_remove() {
 	print_separator
 }
 
+
+# Handle channel commands
+chan() {
+    case "$2" in
+        opc|open) chan_open ;;
+        clc|close) chan_close ;;
+        lsc|list) chan_list ;;
+        *) chan_usage ;;
+    esac
+}
+
+# Handle fees commands
+fees() {
+    case "$2" in
+        check) fees_check "$3" ;;
+        'set') fees_set ;;
+        adjust) fees_adjust ;;
+        *) fees_usage ;;
+    esac
+}
+
+# Handle Wallet commands
+wallet() {
+    case "$2" in
+        init) wallet_init "--header" ;;
+        logs) wallet_logs ;;
+        new) wallet_new_address ;;
+        send) wallet_send_onchain ;;
+        lsa|lsaddr|list-addresses) wallet_list_addresses ;;
+        bal|balance) wallet_balance ;;
+        inv|invoice) wallet_gen_invoice ;;
+        pay|pay-invoice) wallet_pay_invoice ;;
+        *) wallet_usage ;;
+    esac
+}
+
 #
-# --- Handle Command ---
+# --- Handle Top Level Commands ---
 #
 handle_command() {
 	case "$1" in
@@ -1212,7 +1265,7 @@ handle_command() {
 		nb|node-backup) node_backup ;;
 		nr|node-restore) node_backup_restore ${@} ;;
 		ne|node-extract) node_backup_extract ${@} ;;
-		wa|wallet) wallet ${@} ;;
+		wa|wallet) handle_wallet ${@} ;;
 		sec|security-check) security_check ;;
 
 		#
