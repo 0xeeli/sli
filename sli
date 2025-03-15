@@ -6,7 +6,7 @@
 #
 # (c) 2025 0xeeLi ⚡️ MIT License
 #
-sli_version="0.0.1"
+sli_version="0.1"
 
 # --- Configurable Variables ---
 
@@ -45,7 +45,7 @@ RED='\033[1;31m'
 GREEN='\033[1;32m'
 NC='\033[0m' # No color
 
-# Emoji: 🔌 ⚡️ ✘ 🔒 💰 🔗 
+# Emoji: 🔌 ⚡️ ✘ 🔒 💰 🔗
 
 #
 # --- Helper Functions ---
@@ -119,7 +119,7 @@ check_command() {
 # Log events for SLi Wallet aka SLiWa ;-)
 log_action() {
 	local log_file="$SLI_DIR/sliwa.log"
-	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log"; 
+	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log";
 	# Rotate log if file exceeds 1MB
 	if [ $(stat -c %s "$log_file") -gt 1048576 ]; then
 		mv -f "$log_file" "$log_file.old"
@@ -446,23 +446,23 @@ wallet_open_channel() {
 
 # Close a channel cooperatively or forced
 wallet_close_channel() {
-    check_command "jq"
-    echo "🔗 Close a Lightning Channel"
-    print_separator
-    echo "Open channels:"
-    lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
-    echo ""
-    read -p "Channel Point (e.g., txid:output): " chan_point
-    read -p "Force close? (yes/no, default: no): " force
-    force=${force:-no}
-    if [ "$force" == "yes" ]; then
-        lncli closechannel --force "$chan_point"
-        log_action "Force-closed channel: $chan_point"
-    else
-        lncli closechannel "$chan_point"
-        log_action "Cooperatively closed channel: $chan_point"
-    fi
-    print_separator
+	check_command "jq"
+	echo "🔗 Close a Lightning Channel"
+	print_separator
+	echo "Open channels:"
+	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
+	echo ""
+	read -p "Channel Point (e.g., txid:output): " chan_point
+	read -p "Force close? (yes/no, default: no): " force
+	force=${force:-no}
+	if [ "$force" == "yes" ]; then
+		lncli closechannel --force "$chan_point"
+		log_action "Force-closed channel: $chan_point"
+	else
+		lncli closechannel "$chan_point"
+		log_action "Cooperatively closed channel: $chan_point"
+	fi
+	print_separator
 }
 
 # List open channels
@@ -476,6 +476,7 @@ wallet_list_channels() {
 
 # Generate interactively a Lightning invoice
 wallet_gen_invoice() {
+	check_command "jq"
 	echo "⚡️ Generate Lightning Invoice"
 	print_separator
 	read -p "Amount (sat, default: 1000): " amt
@@ -681,40 +682,40 @@ lit_init() {
 # This pool package provides loop and loopd (deamon). Conflict with Lit
 # package, we keep this build.
 loop_install() {
-	
+
 	PKG_NAME="loop"
 	SRC_URL="https://github.com/lightninglabs/loop/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
-	
+
 	# Pre install
 	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
 	pkg_download_tarball
 	pkg_extract_tarball
-	
+
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	echo " * Installing: ${PKG_NAME}"
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo " * Installing: ${PKG_NAME}d"
 	sudo cp -f "${SRC_DIR}/${PKG_NAME}d" /usr/local/bin
-	
+
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
 	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
-	
+
 	# Pool will conflict with LiT Bundle, prefer original version
 	if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list; then
 		echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
 		sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
 	fi
-	
+
 	# Systemd service
 	config_service_unit "loopd" "Loopd Off/On Chain Bridge"
-	
+
 	echo "Documentation: https://lightning.engineering/loop/"
-	
+
 	# Post install
 	pkg_post_install
 }
@@ -722,41 +723,41 @@ loop_install() {
 # This pool package provides pool and poold (deamon) standalone pool
 # provided by LiT don't work properly.
 pool_install() {
-	
+
 	PKG_NAME="pool"
 	SRC_URL="https://github.com/lightninglabs/pool/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
-	
+
 	# Pre install
 	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
 	pkg_download_tarball
 	pkg_extract_tarball
-	
+
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	echo " * Installing: ${PKG_NAME}"
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo " * Installing: ${PKG_NAME}d"
 	sudo cp -f "${SRC_DIR}/${PKG_NAME}d" /usr/local/bin
-	
+
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
 	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
-	
+
 	# Pool will conflict with LiT Bundle, prefer original version
 	if grep -q ".*pool" ${INSTALLED_PKGS}/lit/files.list; then
 		echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Keeping this build"
 		sed -i '/^\/usr\/local\/bin\/pool$/d' "${INSTALLED_PKGS}/lit/files.list"
 	fi
-	
+
 	# Systemd service. Do we realy want pool for everyone ? I mean
 	# experienced user will create the file by them self right ?
 	#config_service_unit "poold" "Lightning Pool Daemon"
-	
+
 	echo "Documentation: https://pool.lightning.engineering/"
-	
+
 	# Post install
 	pkg_post_install
 }
@@ -983,6 +984,7 @@ node_backup_extract() {
 
 # To be improved if/when LND is integrated
 node_health() {
+	check_command "jq"
 	echo "⚡️ Node Health Check"
 	print_separator
 	echo "Service Status:"
@@ -1147,7 +1149,7 @@ pkg_remove() {
 #
 handle_command() {
 	case "$1" in
-		
+
 		version|--version) sli_version ;;
 		init)
 			# Initialization
