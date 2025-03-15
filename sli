@@ -35,7 +35,7 @@ PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 
 # SLi Wallet
-SLIWA_LOG="${SLI_DIR/sliwa.log}"
+SLIWA_LOG=${SLI_DIR}/sliwa.log
 
 # Colors
 PURPLE='\033[1;35m'
@@ -88,6 +88,7 @@ wallet_usage() {
 	cat << EOT
 Usage: $(basename $0) [wa|wallet] [command]
 $(print_separator)
+  logs                View Wallet logs
   new                 Create a ₿TC onchain address
   send                Send ₿TC onchain
   lsa|list-addresse   List onchain wallet addresses
@@ -118,12 +119,11 @@ check_command() {
 
 # Log events for SLi Wallet aka SLiWa ;-)
 log_action() {
-	local log_file="$SLI_DIR/sliwa.log"
-	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLI_DIR/sliwa.log";
+	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLIWA_LOG";
 	# Rotate log if file exceeds 1MB
-	if [ $(stat -c %s "$log_file") -gt 1048576 ]; then
-		mv -f "$log_file" "$log_file.old"
-		touch "$log_file"
+	if [ $(stat -c %s "$SLIWA_LOG") -gt 1048576 ]; then
+		mv -f "$SLIWA_LOG" "${SLIWA_LOG}.old"
+		touch "$SLIWA_LOG"
 	fi
 }
 
@@ -175,17 +175,16 @@ sli_install() {
 	pkg_post_install
 }
 
-# Let user use lit in place of litd
+# Let user use lit in place of litd. also used to check file exist (ie litd.service)
 service_check() {
 	if [ -z "$2" ]; then
 		echo " ✘ Missing service name. Usage: sli $1 <service>"
 		echo "" && exit 1
 	fi
-	if [ "$2" == "lit" ]; then
-		service="litd"
-	else
-		service="$2"
-	fi
+	case "$1" in
+		lit|loop|pool) service="${1}d" ;;
+		*) service="$2" ;;
+	esac
 }
 
 service_start() {
@@ -269,7 +268,11 @@ EOF
 		# Track installed file
 		echo "/etc/systemd/system/${service_unit}" >> ${PKG_DATA}/files.list
 		sudo systemctl daemon-reload
-		#sudo systemctl enable ${1}
+		read -p "Do you wish to start $1 on each boot ? (yes/no) " enable
+		if [ "$enable" == "yes" ]; then
+			echo "Enabling $1 on boot time..."
+			sudo systemctl enable ${1} 2>/dev/null
+		fi
 	fi
 }
 
@@ -367,6 +370,14 @@ wallet_info() {
 	fi
 }
 
+# View SliWa logs
+wallet_logs() {
+	echo "⚡️ Wallet Logs"
+	print_separator
+	cat ${SLIWA_LOG}
+	print_separator
+}
+
 # Used by: service_start and service_restart (litd or lnd)
 wallet_db_exist() {
 	case "$service" in
@@ -410,7 +421,7 @@ wallet_balance() {
 	echo "On-chain Balance:"
 	lncli walletbalance | jq -r '"\(.confirmed_balance) sat (confirmed) / \(.unconfirmed_balance) sat (unconfirmed)"'
 	echo -e "\nChannel Balance:"
-	lncli channelbalance | jq -r '"\(.balance) sat (local) / \(.remote_balance) sat (remote)"'
+	lncli channelbalance | jq -r '"\(.balance) sat (local) / \(.remote_balance.sat) sat (remote)"'
 	print_separator
 }
 
@@ -439,8 +450,9 @@ wallet_open_channel() {
 	read -p "Node ID: " node
 	read -p "Amount : " amt
 	if [ -n "$node" ] && [ -n "$amt" ]; then
+		#--connect="${node}@{host}"
 		lncli openchannel --node_key="$node" --local_amt="$amt"
-		log_action "Opened channel with $node for $amt sats"
+		log_action "Opened channel with $node for: $amt sats"
 	fi
 }
 
@@ -488,16 +500,18 @@ wallet_gen_invoice() {
 	fi
 	if [ -n "$memo" ]; then
 		invoice=$(lncli addinvoice --amt="$amt" --memo="$memo" | jq -r '.payment_request')
+		log_action "Generated invoice for:cd De $amt sat with memo $memo"
 	else
 		invoice=$(lncli addinvoice --amt="$amt" | jq -r '.payment_request')
+		log_action "Generated invoice for: $amt"
 	fi
 	echo "Invoice: $invoice"
-	log_action "Generated invoice for $amt sat with memo: $memo"
 	print_separator
 }
 
 # Pay a Lightning invoice directly
 wallet_pay_invoice() {
+	check_command "jq"
 	echo "💸 Pay a Lightning Invoice"
 	print_separator
 	read -p "Invoice (bolt11): " invoice
@@ -519,6 +533,7 @@ wallet_pay_invoice() {
 wallet() {
 	case "$2" in
 		init) wallet_init "--header" ;;
+		logs) wallet_logs ;;
 		new) wallet_new_address ;;
 		send) wallet_send_onchain ;;
 		lsa|lsaddr|list-addresses) wallet_list_addresses ;;
@@ -1140,6 +1155,12 @@ pkg_remove() {
 		echo " * Removing: $file"
 		sudo rm -f ${file}
 	done
+	# Disable any enabled systemd boot symlink
+	service_check "$pkg" "$pkg"
+	if [ -L "/etc/systemd/system/multi-user.target.wants/${service}.service" ]; then
+		echo " * Removing: systemd boot time unit symlink..."
+		sudo systemctl disable ${service} 2>/dev/null # Be quit for nice SLi output
+	fi
 	rm -rf ${INSTALLED_PKGS}/${pkg}
 	print_separator
 }
