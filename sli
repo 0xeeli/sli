@@ -204,11 +204,11 @@ sli_init() {
 sli_install() {
 
 	PKG_NAME="sli"
-	SRC_URL="https://github.com/0xeeli/sli/archive/refs/heads"
+	SRC_URL="https://github.com/0xeeli/sli/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
-	TARBALL="main.zip"
-	SRC_DIR="sli-main"
-	DL_URL=${SRC_URL}/${TARBALL}
+	TARBALL="${PKG_NAME}-${PKG_VERSION}.tar.gz"
+	SRC_DIR="${PKG_NAME}-${PKG_VERSION}"
+	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
 
 	# Pre install
 	pkg_pre_install "sli" "$PKG_VERSION"
@@ -562,11 +562,19 @@ wallet_send_onchain() {
 	fi
 }
 
+wallet_invoice_check() {
+	if [ -z "$invoice" ]; then
+		echo -e "\n ✘ Failed to generate invoice. Is your node running and wallet unlocked ?\n"
+		exit 1
+	fi
+}
+
 # Generate interactively a Lightning invoice
-wallet_gen_invoice() {
+wallet_invoice() {
 	check_command "jq"
 	echo "⚡️ Generate Lightning Invoice"
 	print_separator
+	echo ""
 	read -p "Amount (sat, default: 1000): " amt
 	amt=${amt:-1000}
 	read -p "Memo (optional): " memo
@@ -574,6 +582,7 @@ wallet_gen_invoice() {
 		echo " ✘ Invalid amount: $amt. Must be numeric."
 		return 1
 	fi
+	wallet_invoice_check
 
 	# Display invoice
 	if [ -n "$memo" ]; then
@@ -583,7 +592,7 @@ wallet_gen_invoice() {
 		invoice=$(lncli addinvoice --amt="$amt" | jq -r '.payment_request')
 		log_action "Generated invoice for: $amt"
 	fi
-	echo -e "${CYAN}Invoice:${NC} $invoice"
+	echo -e "${CYAN}Invoice:${NC} $invoice\n"
 	print_separator
 }
 
@@ -597,11 +606,12 @@ wallet_qr_invoice() {
 
 	echo "⚡️ Generate Lightning Invoice with QR Code"
 	print_separator
+	echo ""
 	read -p "Amount (sat, default: 1000): " amt
 	amt=${amt:-1000}
 	read -p "Memo (optional): " memo
 	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
-		echo " ✘ Invalid amount: $amt. Must be numeric."
+		echo -e "\n ✘ Invalid amount: $amt. Must be numeric."
 		return 1
 	fi
 
@@ -613,10 +623,7 @@ wallet_qr_invoice() {
 		invoice=$(lncli addinvoice --amt="$amt" | jq -r '.payment_request')
 		log_action "Generated QR invoice for: $amt sat"
 	fi
-	if [ -z "$invoice" ]; then
-		echo " ✘ Failed to generate invoice. Is your daemon running and wallet unlocked?"
-		return 1
-	fi
+	wallet_invoice_check
 
 	# Ensure output dir exists
 	mkdir -p "$INVOICE_DIR"
@@ -635,6 +642,7 @@ wallet_qr_invoice() {
 
 	echo -e "${CYAN}Invoice:${NC} $invoice"
 	echo -e "${YELLOW}QR Code saved to:${NC} $invoice_qr"
+	echo ""
 	print_separator
 }
 
@@ -1469,7 +1477,7 @@ wallet() {
 		send) wallet_send_onchain ;;
 		lsa|lsaddr|list-addresses) wallet_list_addresses ;;
 		bal|balance) wallet_balance ;;
-		inv|invoice) wallet_gen_invoice ;;
+		inv|invoice) wallet_invoice ;;
 		qri|qr-invoice) wallet_qr_invoice ;;
 		pay|pay-invoice) wallet_pay_invoice ;;
 		*) wallet_usage ;;
