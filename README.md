@@ -3,7 +3,9 @@ SLi (Simply Lightning) is a versatile shell utility designed to simplify Bitcoin
 
 ![sli-install-16032025](https://github.com/user-attachments/assets/e8f2854f-0e3d-4a06-b931-f563ecee7048)
 
-SLi provides easy package management for Lightning node operators, install, init, configure or update packages trough simple commands. Package includes SLi and Lit, Loop, Pool, Lnconnect (LND and Alby Hub are coming soon). It create service file unit and manage daemons via systemd, provides some useful tools such as getting the HEX of macaroon or generating QR invoice. Many interactive command as well so you dont need to write long cmline commands with arguments, basic but useful wallet to send BTC, create invoice, make a payment, check wallet health, and more. You even dont need to remember all command, SLi comes with nifty Bash completion.
+SLi provides easy package management for Lightning node operators, install, init, configure or update packages trough simple commands. Package includes SLi and Lit, Loop, Pool, Lnconnect (LND and Alby Hub are coming soon). It create service file unit and manage daemons via systemd, provides some useful tools such as getting the HEX of macaroon or generating QR invoice. 
+
+SLi comes with many interactive command as well so you dont need to write long commands with arguments, basic but useful wallet to send BTC, create invoice, make a payment, check node health, and more, see the Key Features below. You even dont need to remember all commands, SLi comes with nifty Bash completion (double press on Tab key).
 
 ## Key Features
 
@@ -31,6 +33,7 @@ You can clone this Github repository or download the latest release archive, ext
 ## Documentation
 
 [SLi User Manual](https://0xee.li/sli/man.html) - [Quick Guides](https://0xee.li/sli/#quickguides) on SLi website or check out the builtin commands and tools running SLi without arguments: `sli`
+
 
 ⚡️ Built with love by 0xeeLi under the MIT License.
 
