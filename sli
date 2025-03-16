@@ -20,7 +20,6 @@ EDITOR="nano"
 
 # Backup Configs
 BACKUP_DIR="$HOME/lnd-backup"
-WALLET_PASS="$LND_DIR/wallet.pass"
 TMP_BACKUP_DIR="$BACKUP_DIR/tmp"
 EXTRACTED_DIR="$BACKUP_DIR/extracted"
 
@@ -34,8 +33,9 @@ CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 
-# SLi Wallet
+# Log files for SLi Wallet and Node actions
 SLIWA_LOG=${SLI_DIR}/sliwa.log
+NODE_LOG=${SLI_DIR}/node.log
 
 # Colors
 PURPLE='\033[1;35m'
@@ -99,7 +99,7 @@ $(print_separator)
   logs                View Wallet logs
   new                 Create a ₿TC onchain address
   send                Send ₿TC onchain
-  lsa|list-addresse   List onchain wallet addresses
+  lsa|list-addresses  List onchain wallet addresses
   bal|balance         Wallet balance
   inv|invoice         Generate a Lightning invoice
   pay|pay-invoice     Pay a Lightning invoice
@@ -144,13 +144,20 @@ check_command() {
 	fi
 }
 
-# Log events for SLi Wallet aka SLiWa ;-)
+# Log events for SLi Wallet aka SLiWa ;-) and node actions.
+# Rotate log if file exceeds 1MB
 log_action() {
-	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLIWA_LOG";
-	# Rotate log if file exceeds 1MB
+	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLIWA_LOG"
 	if [ $(stat -c %s "$SLIWA_LOG") -gt 1048576 ]; then
 		mv -f "$SLIWA_LOG" "${SLIWA_LOG}.old"
 		touch "$SLIWA_LOG"
+	fi
+}
+node_log_action() {
+	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$NODE_LOG"
+	if [ $(stat -c %s "$NODE_LOG") -gt 1048576 ]; then
+		mv -f "$NODE_LOG" "${NODE_LOG}.old"
+		touch "$NODE_LOG"
 	fi
 }
 
@@ -350,22 +357,60 @@ config_edit() {
 	esac
 }
 
-# TO IMPROVE
 # We check the files created by SLi
 security_check() {
-	echo "⚡️ Security Check on files created by SLi"
+	echo "⚡️ Security Check on SLi-Created Files"
 	print_separator
-	for file in ${WALLET_PASS} ${LIT_CONF} ${LND_CONF}; do
-		# Ensure file exist before checking permissions
-		if [ -f "$file" ]; then
-			echo -en "Checking ${YELLOW}$(basename $file)${NC}:"
-			if [ "$(stat -c %a "$file")" == "600" ]; then
-				echo -e " permissions ${GREEN}0600${NC}"
-			else
-				echo " ✘ Security fix needed: chmod 0600 $file"
+	user=$(whoami)
+
+	# List of files to check
+	files=(
+		"$WALLET_PASS"
+		"$SLI_CONF"
+		"$LIT_CONF"
+		"$LND_CONF"
+		#"$LND_DIR/data/chain/bitcoin/mainnet/admin.macaroon"
+		"$BACKUP_DIR"/*.gpg
+	)
+
+	for file in "${files[@]}"; do
+		# Handle glob expansion for backups
+		if [[ "$file" == "$BACKUP_DIR"/*.gpg ]]; then
+			if ! ls $file >/dev/null 2>&1; then
+				continue  # Skip if no backups exist
 			fi
 		fi
+		# Ensure file exists before checking
+		if [ -f "$file" ]; then
+			echo -e "Checking: ${YELLOW}$(basename "$file")${NC}"
+			local perms=$(stat -c %a "$file")
+			local owner=$(stat -c %U "$file")
+			# Check permissions (should be 0600)
+			if [ "$perms" != "600" ]; then
+				echo -e " --> Permissions: ${RED}$perms${NC} (should be 0600)"
+				read -p "Fix permissions to 0600? (yes/no): " fix
+				if [ "$fix" == "yes" ]; then
+					chmod 0600 "$file"
+					echo "  ✔ Fixed permissions to: 0600"
+				fi
+			else
+				echo -e " --> Permissions: ${GREEN}0600${NC}"
+			fi
+			# Check ownership
+			if [ "$owner" != "$user" ]; then
+				echo -e " --> Owner: ${RED}$owner${NC} (should be $user)"
+				read -p "Change owner to $user? (yes/no): " fix
+				if [ "$fix" == "yes" ]; then
+					chown "$user" "$file"
+					echo "  ✔ Fixed owner to $user"
+				fi
+			else
+				echo -e " --> Owner: ${GREEN}$user${NC}"
+			fi
+			echo ""
+		fi
 	done
+	print_separator
 }
 
 # Sing a message in interactive mode by the node’s identity private key
@@ -441,7 +486,7 @@ wallet_new_address() {
 		echo "New ₿TC address: $addr"
 		log_action "Created BTC onchain address: $addr"
 	else
-		echo -e "${RED}Is your litd or lnd daemon running and wallet unlock ?${NC}"
+		echo -e "${RED}Is your litd or lnd daemon running and wallet unlocked ?${NC}"
 	fi
 	print_separator
 }
@@ -599,6 +644,7 @@ fees_check() {
 # Set routing fees
 fees_set() {
 	check_command "jq"
+	check_command "bc"
 	echo "⚡️ Set Routing Fees"
 	print_separator
 	echo "Options:"
@@ -623,11 +669,11 @@ fees_set() {
 	if [ -z "$chan_point" ]; then
 		echo "Applying globally: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --min_htlc_msat 1000 --time_lock_delta 40
-		#log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
+		node_log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
 	else
 		echo "Applying to channel $chan_point: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
-		#log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
+		node_log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
 	fi
 	echo "✔ Fees updated successfully."
 	print_separator
@@ -670,8 +716,7 @@ fees_adjust() {
 	echo "Applying: Base Fee: $new_base msat | Fee Rate: $new_rate ppm"
 	lncli updatechanpolicy --base_fee_msat "$new_base" --fee_rate "$new_rate_decimal" \
 		--chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
-	# Use node.log ?
-	#log_action "Adjusted fees for $chan_point: Base $new_base msat, Rate $new_rate ppm ($action)"
+	node_log_action "Adjusted fees for $chan_point: Base $new_base msat, Rate $new_rate ppm ($action)"
 	echo "✔ Fees adjusted successfully."
 	print_separator
 }
@@ -1068,6 +1113,8 @@ node_backup() {
 	echo " * Encrypting backup..."
 	gpg --batch --yes --passphrase-file "$WALLET_PASS" -c "$BACKUP_FILE"
 	rm -f "$BACKUP_FILE"
+	echo " * Setting backup file permissions to: 0600 "
+	chmod 0600 "$BACKUP_FILE"
 
 	size=$(du -sh ${BACKUP_FILE}.gpg | cut -d "	" -f 1)
 	echo -e " ✔ Backup completed successfully: ${CYAN}${size}${NC}"
@@ -1132,12 +1179,12 @@ node_health() {
 	echo "⚡️ Node Health Check"
 	print_separator
 	echo "Service Status:"
-	systemctl is-active litd >/dev/null 2>&1 && echo -e " - litd: ${GREEN}Running${NC}" \
-		|| echo " - litd: ${RED}Stopped${NC}"
+	systemctl is-active litd >/dev/null 2>&1 && echo -e " --> litd: ${GREEN}Running${NC}" \
+		|| echo " --> litd: ${RED}Stopped${NC}"
 	echo -e "\nSync Status:"
-	lncli getinfo | jq -r '" - Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
+	lncli getinfo | jq -r '" --> Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
 	echo -e "\nConnected Peers:"
-	lncli listpeers | jq -r '.peers | length' | xargs echo " - Peers:"
+	lncli listpeers | jq -r '.peers | length' | xargs echo " --> Peers:"
 	print_separator
 }
 
@@ -1294,7 +1341,6 @@ pkg_remove() {
 	print_separator
 }
 
-
 # Handle channel commands
 chan() {
 	case "$2" in
@@ -1339,13 +1385,11 @@ handle_command() {
 
 		version|--version) sli_version ;;
 		init)
-			# Initialization
 			case "$2" in
 				wallet) wallet_init "--header" ;;
 				lit) lit_init ;;
 				*) sli_init ;;
 			esac ;;
-
 		start) service_start ${@} ;;
 		stop) service_stop ${@} ;;
 		rs|restart) service_restart ${@} ;;
@@ -1353,30 +1397,20 @@ handle_command() {
 		ed|edit) config_edit ${2} ;;
 		lg|logs) service_logs ${@} ;;
 		st|status) service_status ${@} ;;
-
-		#
 		# --- Node ---
-		#
-
 		nh|node-health) node_health ;;
 		sign) sign_message ;;
 		chan) chan ${@} ;;
 		fees) fees ${@} ;;
-
-
-		#
 		# --- Tools ---
-		#
-
 		m2h|macaroon-to-hex) macaroon_to_hex ${2} ;;
 		gpw|gen-passwords) passwords_change ${@} ;;
-		wa|wallet) wallet ${@} ;;
+		nb|node-backup) node_backup ;;
+		nr|node-restore) node_backup_restore ${@} ;;
+		ne|node-extract) node_backup_extract ${@} ;;
 		sec|security-check) security_check ;;
-
-		#
+		wa|wallet) wallet ${@} ;;
 		# --- Packages manager ---
-		#
-
 		'in'|install)
 			if [ "$2" == "sli" ]; then
 				echo "If you need to reinstall this version, run: sli init"
@@ -1388,14 +1422,12 @@ handle_command() {
 			else
 				echo "No package named: $2"
 			fi ;;
-
 		ls|list) pkgs_list ;;
 		up|upgrade) pkgs_upgrade ;;
 		rm|remove) pkg_remove ${2} ;;
 		cc|clean-cache)
 			echo "Removing cache directory content..."
 			rm -rf ${CACHE_DIR}/* ;;
-
 		*) usage ;;
 	esac
 }
