@@ -180,12 +180,22 @@ sli_init() {
 	mkdir -p ${INSTALLED_PKGS}/${pkg} ${CACHE_DIR}
 	echo -e "Storing curent SLi version: ${CYAN}$sli_version${NC}"
 	echo "version=\"$sli_version\"" > ${INSTALLED_PKGS}/${pkg}/pkg.conf
-	echo -e "Installing sli: /usr/local/bin/${pkg}"
+	
+	echo -e " * Installing SLi: /usr/local/bin/${pkg}"
 	sudo cp -f ${0} /usr/local/bin 2>/dev/null
 	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
+	
+	# Install bash completion if you init from sli src
+	if [ -f "sli-bash-completion.sh" ]; then
+		comp="/usr/share/bash-completion/completions/sli"
+		echo " * Installing SLi bash completion..."
+		sudo cp -f sli-bash-completion.sh ${comp}
+		echo "$comp" >> ${INSTALLED_PKGS}/${pkg}/files.list
+	fi
+	
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	# Create an empty sli.conf to let user customize some variables/paths
-	touch ${SLI_CONF}
+	touch ${SLI_DIR}/sli.conf
 	print_separator
 }
 
@@ -210,6 +220,12 @@ sli_install() {
 	echo " * Installing: sli"
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo "/usr/local/bin/sli" > ${PKG_DATA}/files.list
+	
+	# Install bash completion
+	comp="/usr/share/bash-completion/completions/sli"
+	echo " * Installing SLi bash completion..."
+	sudo cp -f sli-bash-completion.sh ${comp}
+	echo "$comp" >> ${INSTALLED_PKGS}/${pkg}/files.list
 
 	# Post install
 	pkg_post_install
