@@ -561,7 +561,7 @@ wallet_send_onchain() {
 	read -p "Address: " addr
 	read -p "Amount : " amt
 	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
-		echo " ✘ Invalid amount: $amt. Must be numeric."
+		echo " ✘ Invalid amount: $amt Must be numeric."
 		return 1
 	fi
 	if [ -n "$addr" ] && [ -n "$amt" ]; then
@@ -691,7 +691,7 @@ chan_open() {
 	# lnd.bitcoin.feerate=5
 	if [ -n "$node" ] && [ -n "$amt" ]; then
 		#--connect="${node}@{host}"
-		lncli openchannel --node_key="$node" --local_amt="$amt"
+		lncli openchannel --node_key="$node" --local_amt="$amt" || exit 1
 		node_log_action "Opened channel with $node for: $amt sats"
 	fi
 }
@@ -722,7 +722,7 @@ chan_list() {
 	check_command "jq"
 	echo "🔗 Open Lightning Channels"
 	print_separator
-	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Capacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
+	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey)\nCapacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
 	print_separator
 }
 
@@ -1369,9 +1369,10 @@ pkg_extract_tarball() {
 	echo "Extracting: $TARBALL"
 	mkdir -p ${SRC_DIR}
 	case "$TARBALL" in
-		*.tar.gz) tar xzf ${TARBALL} -C ${SRC_DIR} ;;
-		*.tar.bz2) tar xjf ${TARBALL} -C ${SRC_DIR} ;;
-		*.zip) unzip ${TARBALL} ;; #-d ${SRC_DIR}
+		*.tar.gz) tar xzf ${TARBALL} ;;
+		*.tar.bz2) tar xjf ${TARBALL} ;;
+		"alby"*.tar.bz2) tar xjf ${TARBALL} -C ${SRC_DIR} ;; # -C for Alby
+		*.zip) unzip ${TARBALL} ;;
 	esac
 }
 
@@ -1398,6 +1399,23 @@ pkg_pre_install() {
 			echo "" && exit 0
 		fi
 	fi
+	
+	# We must handle packages conflict here. If lit is installed 
+	# warn user: loop, pool will not work with litd, they need LND.
+	case ${PKG_NAME} in
+		loop|pool)
+			if [ -d "${INSTALLED_PKGS}/lit" ]; then
+				echo -e "The Lit package is installed and conflicts with:: ${CYAN}${PKG_NAME}${NC}"
+				echo "Lit is a bundle that provides loop, pool, lncli, and its own daemon, litd."
+				echo "If you install $PKG_NAME, it will not work properly with litd."
+				echo "You can either remove Lit or continue, and SLi will erase the $PKG_NAME Lit version."
+				echo ""
+				read -p "Continue installation anyway ? (yes/no) " answer
+				[ "$answer" != "yes" ] && exit 0 
+			fi ;;
+		lnd)
+			echo "TODO" ;; # LND is not yet include
+	esac
 	
 	echo "⚡️ Installing: $PKG_NAME $PKG_VERSION"
 	print_separator
