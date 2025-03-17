@@ -1243,6 +1243,7 @@ node_backup_check_path() {
 # Function to create a backup
 node_backup() {
 
+	check_command "gpg"
 	echo "⚡️ Creating Node Backup"
 	print_separator
 	# Ensure backup directory exists
