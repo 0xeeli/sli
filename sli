@@ -891,10 +891,12 @@ lit_install() {
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	for bin in $(ls $SRC_DIR); do
 		# Handle conflict with loop, pool and friends
-		if ! command -v "$bin" >/dev/null 2>&1; then
+		if [ ! -d ${INSTALLED_PKGS}/${bin} ]; then
 			echo " * Installing: $bin"
 			sudo cp -f ${SRC_DIR}/${bin} /usr/local/bin
 			echo "/usr/local/bin/$bin" >> ${PKG_DATA}/files.list
+		else
+			echo -e " ! Skipping  : ${RED}$bin${NC}"
 		fi
 	done
 
@@ -1002,10 +1004,13 @@ loop_install() {
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
 	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
 
-	# Pool will conflict with LiT Bundle, prefer original version
-	if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list; then
-		echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
-		sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
+	# Pool will conflict with LiT Bundle, prefer this version.
+	# loop-mode=disable can be set in lit.conf
+	if [ -d ${INSTALLED_PKGS}/lit ]; then
+		if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list; then
+			echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
+			sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
+		fi
 	fi
 
 	# Systemd service
@@ -1043,10 +1048,13 @@ pool_install() {
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
 	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
 
-	# Pool will conflict with LiT Bundle, prefer original version
-	if grep -q ".*pool" ${INSTALLED_PKGS}/lit/files.list; then
-		echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Keeping this build"
-		sed -i '/^\/usr\/local\/bin\/pool$/d' "${INSTALLED_PKGS}/lit/files.list"
+	# Pool will conflict with LiT Bundle, prefer this version.
+	# pool-mode=disable can be set in lit.conf
+	if [ -d ${INSTALLED_PKGS}/lit ]; then
+		if grep -q ".*pool" ${INSTALLED_PKGS}/lit/files.list; then
+			echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Keeping this build"
+			sed -i '/^\/usr\/local\/bin\/pool$/d' "${INSTALLED_PKGS}/lit/files.list"
+		fi
 	fi
 
 	# Systemd service.
@@ -1401,7 +1409,7 @@ pkg_pre_install() {
 	case ${PKG_NAME} in
 		loop|pool)
 			if [ -d "${INSTALLED_PKGS}/lit" ]; then
-				echo -e "The Lit package is installed and conflicts with:: ${CYAN}${PKG_NAME}${NC}"
+				echo -e "The Lit package is installed and conflicts with: ${CYAN}${PKG_NAME}${NC}"
 				echo "Lit is a bundle that provides loop, pool, lncli, and its own daemon, litd."
 				echo "If you install $PKG_NAME, it will not work properly with litd."
 				echo "You can either remove Lit or continue, and SLi will erase the $PKG_NAME Lit version."
