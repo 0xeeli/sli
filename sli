@@ -661,15 +661,10 @@ wallet_pay_invoice() {
 	check_command "jq"
 	echo "💸 Pay a Lightning Invoice"
 	print_separator
+	echo ""
 	read -p "Invoice (bolt11): " invoice
 	if [ -n "$invoice" ]; then
-		result=$(lncli payinvoice --json "$invoice" | jq -r '.payment_error // "Success"')
-		if [ "$result" == "Success" ]; then
-			echo "✔ Payment successful"
-			log_action "Paid invoice: $invoice"
-		else
-			echo " ✘ Payment failed: $result"
-		fi
+		lncli payinvoice "$invoice"
 	else
 		echo " ✘ No invoice provided"
 	fi
