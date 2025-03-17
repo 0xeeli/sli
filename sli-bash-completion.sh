@@ -4,7 +4,8 @@
 #
 
 _sli_completions() {
-	local cur prev commands tools wallet_cmds pkg_cmds packages
+	local cur prev commands chan_cmds fees_cmds tools wallet_cmds 
+	local pkg_cmds packages daemons
 	COMPREPLY=()  # Array for completion suggestions
 	cur="${COMP_WORDS[COMP_CWORD]}"  # Current word being completed
 	prev="${COMP_WORDS[COMP_CWORD-1]}"  # Previous word
@@ -16,9 +17,10 @@ _sli_completions() {
 	wallet_cmds="init logs new send list-addresses balance invoice qr-invoice pay-invoice"
 	tools="macaroon-hex gen-passwords node-backup node-restore node-extract security-check wallet"
 	pkgs_cmds="install upgrade list clean-cache remove"
+	daemons="albyhub litd lnd loopd poold"
 
 	# Fetch installed and available packages dynamically (if possible)
-	packages="lit loop pool lndconnect"  # Static list; could parse $PKGS_LIST
+	packages="albyhub lit loop pool lndconnect"  # Static list; could parse $PKGS_LIST
 
 	# Top-level command completion
 	if [ "$COMP_CWORD" -eq 1 ]; then
@@ -29,9 +31,9 @@ _sli_completions() {
 			init)
 				COMPREPLY=($(compgen -W "wallet lit" -- "$cur")) ;;
 			start|stop|restart|logs|status)
-				COMPREPLY=($(compgen -W "litd lnd loopd poold" -- "$cur")) ;;
+				COMPREPLY=($(compgen -W "$daemons" -- "$cur")) ;;
 			show-config|edit)
-				COMPREPLY=($(compgen -W "lit lnd sli" -- "$cur")) ;;
+				COMPREPLY=($(compgen -W "albyhub lit lnd sli" -- "$cur")) ;;
 			chan)
 				COMPREPLY=($(compgen -W "$chan_cmds" -- "$cur")) ;;
 			fees)

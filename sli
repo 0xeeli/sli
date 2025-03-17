@@ -14,8 +14,9 @@ LIT_DIR="$HOME/.lit"
 LIT_CONF="$LIT_DIR/lit.conf"
 LND_DIR="$HOME/.lnd"
 LND_CONF="$LND_DIR/lnd.conf"
+ALBY_CONF="/etc/systemd/system/albyhub.service" # Use Environment=
 
-# --- Configurable Variables in a custom sli.conf ---
+# --- Configurable Variables - Can be in a custom sli.conf ---
 
 SLI_DIR="$HOME/.sli"
 WALLET_PASS="$LND_DIR/wallet.pass"
@@ -349,6 +350,7 @@ config_show() {
 	echo -e "⚡️ Configuration file for: ${CYAN}$1${NC}"
 	print_separator
 	case "$1" in
+		albyhub|alby) config_show_file "$ALBY_CONF" ;;
 		lit) config_show_file "$LIT_CONF" ;;
 		lnd) config_show_file "$LND_CONF" ;;
 		sli) config_show_file "$SLI_CONF" ;;
@@ -362,7 +364,10 @@ config_edit_file() {
 	if [ ! -f "$1" ]; then
 		echo " ✘ No config file found: Try 'sli init <pkg>' to initialize."
 	else
-		${EDITOR} ${1}
+		case "$1" in
+			*.service) sudo ${EDITOR} ${1} ;;
+			*) ${EDITOR} ${1} ;;
+		esac
 	fi
 }
 
@@ -371,7 +376,12 @@ config_edit() {
 	if [ ! -n "$1" ]; then
 		echo -e "Usage: $(basename $0) edit <pkg>\n" && exit 0
 	fi
+	echo $1
 	case "$1" in
+		albyhub|alby) # We use systemd unit to configure Alb Hub
+			config_edit_file "$ALBY_CONF"
+			echo "Reloading systemd configuration..."
+			sudo systemctl daemon-reload ;;
 		lit) config_edit_file "$LIT_CONF" ;;
 		lnd) config_edit_file "$LND_CONF" ;;
 		sli) config_edit_file "$SLI_CONF" ;;
@@ -676,6 +686,9 @@ chan_open() {
 	print_separator && echo ""
 	read -p "Node ID: " node
 	read -p "Amount : " amt
+	#read -p "Fee rate :" fee
+	#--sat_per_vbyte=5 ensure fast transactions here or/and in lit.conf
+	# lnd.bitcoin.feerate=5
 	if [ -n "$node" ] && [ -n "$amt" ]; then
 		#--connect="${node}@{host}"
 		lncli openchannel --node_key="$node" --local_amt="$amt"
@@ -1075,6 +1088,49 @@ lndconnect_install() {
 	pkg_post_install
 }
 
+# Alby Hub install
+albyhub_install() {
+
+	PKG_NAME="albyhub"
+	SRC_URL="https://github.com/getAlby/hub/releases/download"
+	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	TARBALL="${PKG_NAME}-Server-Linux-x86_64.tar.bz2"
+	SRC_DIR="${PKG_NAME}-Server-Linux-x86_64"
+	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
+
+	# Pre install
+	pkg_pre_install "albyhub" "$PKG_VERSION"
+	pkg_download_tarball
+	pkg_extract_tarball
+
+	# Install to /usr/local/bin
+	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
+	echo " * Installing: ${PKG_NAME}"
+	sudo cp -f ${SRC_DIR}/bin/${PKG_NAME} /usr/local/bin
+	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
+	
+	# Install to /usr/local/lib
+	for lib in $(ls ${SRC_DIR}/lib); do
+		echo " * Installing: $lib"
+		sudo cp -f ${SRC_DIR}/lib/${lib} /usr/local/lib
+		echo "/usr/local/lib/${lib}" >> ${PKG_DATA}/files.list
+	done
+	
+	# Systemd service
+	config_service_unit "${PKG_NAME}" "Alby Hub Server"
+	
+	# Alby Hub don't use a config file, we need additional startup 
+	# environment variables. Let's sed!
+	echo "Adding environment variables to: ${PKG_NAME}.service"
+	sudo sed -i "/AmbientCapabilities=CAP_NET_BIND_SERVICE/a \
+Environment=\"PORT=8029\"\n\
+Environment=\"WORK_DIR=$HOME/.albyhub\"\n\
+Environment=\"LOG_EVENTS=true\"\n\
+Environment=\"LDK_GOSSIP_SOURCE=\"" "/etc/systemd/system/${PKG_NAME}.service"
+	sudo systemctl daemon-reload
+	pkg_post_install
+}
+
 #
 # --- Tools functions ---
 #
@@ -1308,12 +1364,14 @@ pkg_download_tarball() {
 	fi
 }
 
+# Ensure we extract in SRC_DIR
 pkg_extract_tarball() {
 	echo "Extracting: $TARBALL"
+	mkdir -p ${SRC_DIR}
 	case "$TARBALL" in
-		*.tar.gz) tar xzf ${TARBALL} ;;
-		*.tar.bz2) tar xjf ${TARBALL} ;;
-		*.zip) unzip ${TARBALL} ;;
+		*.tar.gz) tar xzf ${TARBALL} -C ${SRC_DIR} ;;
+		*.tar.bz2) tar xjf ${TARBALL} -C ${SRC_DIR} ;;
+		*.zip) unzip ${TARBALL} ;; #-d ${SRC_DIR}
 	esac
 }
 
@@ -1343,7 +1401,7 @@ pkg_pre_install() {
 	
 	echo "⚡️ Installing: $PKG_NAME $PKG_VERSION"
 	print_separator
-	# Continuing for install/upgrade - We work in Sli cache directory
+	# Continuing for install/upgrade - We work in SLi cache directory
 	mkdir -p ${PKG_DATA} ${CACHE_DIR} && cd ${CACHE_DIR}
 	# Keep track of previous installed files
 	mv -f ${PKG_DATA}/files.list ${PKG_DATA}/files.list.old 2>/dev/null
