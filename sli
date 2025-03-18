@@ -76,7 +76,7 @@ $(echo -e "${YELLOW}Node Manager:${NC}")
   sign               Sign message with your node private key
   connect            Connect to a remote peer
   chan               Channel management (open, close, list)
-  fees               Fee management (check, set, adjust)
+  fees               Fee management (check, set, adjust, bump)
 
 $(echo -e "${YELLOW}Tools:${NC}")
   m2h|macaroon-hex   Get the HEX format of a macaroon
@@ -132,6 +132,7 @@ $(print_separator)
   check       Check current fee policies (optional: <channel_point>)
   set         Set fees interactively (global or specific channel)
   adjust      Adjust fees dynamically based on traffic or balance
+  bump        Speed up a transaction (enter TX id and new sat/vB)
 EOT
 }
 
@@ -1023,6 +1024,8 @@ loop_install() {
 		if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list; then
 			echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
 			sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
+			# Store a backup of 'lit loop' to be restored on loop remove
+			cp -f /usr/local/bin/loop ${${INSTALLED_PKGS}}/lit/loop
 		fi
 	fi
 
@@ -1367,6 +1370,38 @@ node_health() {
 # --- Packages Manager functions ---
 #
 
+# First check sli itself, then load a custom receip, check for
+# a receipe in /usr/local/lib/sli (all packages install functions
+# may/will... be in this path) and finaly use built-in function.
+pkg_install() {
+	if [ "$2" == "sli" ]; then
+		echo "If you need to reinstall this version, run: sli init"
+		echo "" && exit 0
+	fi
+	# We can install a package from a plugin recipe.sh file (providing
+	# pkgname_install) from the curremt dir. Useful for development.
+	if [ -f ${2}_recipe.sh ]; then
+		source ${2}_recipe.sh
+		${2}_install
+		print_separator
+		echo "" && exit 0
+	fi
+	# Let see if a package receip.sh is installed
+	if [ -f /usr/local/lib/sli/${2}_recipe.sh ]; then
+		source /usr/local/lib/sli/${2}_recipe.sh
+		${2}_install
+		print_separator
+		echo "" && exit 0
+	fi
+	# Use built-in package
+	if [ $(declare -F ${2}_install) ]; then
+		${2}_install
+		print_separator
+	else
+		echo "No package named: $2"
+	fi 	
+}
+
 pkg_get_version() {
 	grep "^${1}|" ${PKGS_LIST} | cut -d "|" -f 2
 }
@@ -1387,8 +1422,8 @@ pkg_extract_tarball() {
 	mkdir -p ${SRC_DIR}
 	case "$TARBALL" in
 		*.tar.gz) tar xzf ${TARBALL} ;;
-		*.tar.bz2) tar xjf ${TARBALL} ;;
 		"alby"*.tar.bz2) tar xjf ${TARBALL} -C ${SRC_DIR} ;; # -C for Alby
+		*.tar.bz2) tar xjf ${TARBALL} ;;
 		*.zip) unzip ${TARBALL} ;;
 	esac
 }
@@ -1431,7 +1466,15 @@ pkg_pre_install() {
 				[ "$answer" != "yes" ] && exit 0 
 			fi ;;
 		lnd)
-			echo "TODO" ;; # LND is not yet include
+			if [ -d "${INSTALLED_PKGS}/lit" ]; then
+				echo -e "The Lit package is installed and conflicts with: ${CYAN}${PKG_NAME}${NC}"
+				echo "Lit is a bundle that provides litd and lncli (LND command line interface)"
+				echo "If you plan to use LND as your node daemon, you can always install LiT"
+				echo "And then disable integrade mode, so you have LiT for UI and lnd as deamon"
+				echo ""
+				read -p "Continue installation anyway ? (yes/no) " answer
+				[ "$answer" != "yes" ] && exit 0
+			fi ;;
 	esac
 	
 	echo "⚡️ Installing: $PKG_NAME $PKG_VERSION"
@@ -1614,17 +1657,7 @@ handle_command() {
 		sec|security-check) security_check ;;
 		wa|wallet) wallet ${@} ;;
 		# --- Packages manager ---
-		'in'|install)
-			if [ "$2" == "sli" ]; then
-				echo "If you need to reinstall this version, run: sli init"
-				echo "" && exit 0
-			fi
-			if [ $(declare -F ${2}_install) ]; then
-				${2}_install
-				print_separator
-			else
-				echo "No package named: $2"
-			fi ;;
+		'in'|install) pkg_install ${@} ;;
 		ls|list) pkgs_list ;;
 		up|upgrade) pkgs_upgrade ;;
 		rm|remove) pkg_remove ${2} ;;
