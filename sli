@@ -826,6 +826,19 @@ fees_adjust() {
 	print_separator
 }
 
+# Speed up a transaction
+fees_bump() {
+	echo "⚡️ Bump (speed up) a transaction"
+	print_separator
+	echo "Make sure your transaction is flaged RBF (Replace-by-fee)"
+	echo ""
+	read -p "TX id: " tx
+	read -p "New sat/vB: " spb
+	[ -n "$tx" ] || exit 0
+	[ -n "spb" ] || exit 0
+	lncli wallet bumpfee --sat_per_byte ${spb} ${tx}:0
+}
+
 #
 # --- Packages function: init + install + config files ---
 #
@@ -1544,6 +1557,7 @@ fees() {
 		check) fees_check "$3" ;;
 		'set') fees_set ;;
 		adjust) fees_adjust ;;
+		bump) fees_bump ;;
 		*) fees_usage ;;
 	esac
 }
