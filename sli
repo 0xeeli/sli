@@ -35,8 +35,7 @@ PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 
 # Log files for SLi Wallet and Node actions
-SLIWA_LOG=${SLI_DIR}/sliwa.log
-NODE_LOG=${SLI_DIR}/node.log
+SLI_LOG=${SLI_DIR}/sli.log
 
 # Node Backup
 TMP_BACKUP_DIR="$BACKUP_DIR/tmp"
@@ -152,20 +151,12 @@ check_command() {
 	fi
 }
 
-# Log events for SLi Wallet aka SLiWa ;-) and node actions.
-# Rotate log if file exceeds 1MB
+# Log events for SLi. Rotate log if file exceeds 1MB
 log_action() {
-	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$SLIWA_LOG"
-	if [ $(stat -c %s "$SLIWA_LOG") -gt 1048576 ]; then
-		mv -f "$SLIWA_LOG" "${SLIWA_LOG}.old"
-		touch "$SLIWA_LOG"
-	fi
-}
-node_log_action() {
-	echo "$(date '+%Y-%m-%d %H:%M:%S') : $1" >> "$NODE_LOG"
-	if [ $(stat -c %s "$NODE_LOG") -gt 1048576 ]; then
-		mv -f "$NODE_LOG" "${NODE_LOG}.old"
-		touch "$NODE_LOG"
+	echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$SLI_LOG"
+	if [ $(stat -c %s "$SLI_LOG") -gt 1048576 ]; then
+		mv -f "$SLI_LOG" "${SLI_LOG}.old"
+		touch "$SLI_LOG"
 	fi
 }
 
@@ -682,13 +673,12 @@ chan_open() {
 	print_separator && echo ""
 	read -p "Node ID: " node
 	read -p "Amount : " amt
-	#read -p "Fee rate :" fee
-	#--sat_per_vbyte=5 ensure fast transactions here or/and in lit.conf
+	read -p "Fee rate (sats/vB): " fee
+	# ensure fast transactions here or/and in lit.conf
 	# lnd.bitcoin.feerate=5
-	if [ -n "$node" ] && [ -n "$amt" ]; then
-		#--connect="${node}@{host}"
-		lncli openchannel --node_key="$node" --local_amt="$amt" || exit 1
-		node_log_action "Opened channel with $node for: $amt sats"
+	if [ -n "$node" ] && [ -n "$amt" ] && [ -n "$fee" ]; then
+		lncli openchannel --node_key="$node" --local_amt="$amt" --sat_per_vbyte="$fee" || exit 1
+		log_action "Opened channel with $node for: $amt sats"
 	fi
 }
 
@@ -705,10 +695,10 @@ chan_close() {
 	force=${force:-no}
 	if [ "$force" == "yes" ]; then
 		lncli closechannel --force "$chan_point"
-		node_log_action "Force-closed channel: $chan_point"
+		log_action "Force-closed channel: $chan_point"
 	else
 		lncli closechannel "$chan_point"
-		node_log_action "Cooperatively closed channel: $chan_point"
+		log_action "Cooperatively closed channel: $chan_point"
 	fi
 	print_separator
 }
@@ -772,11 +762,11 @@ fees_set() {
 	if [ -z "$chan_point" ]; then
 		echo "Applying globally: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --min_htlc_msat 1000 --time_lock_delta 40
-		node_log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
+		log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
 	else
 		echo "Applying to channel $chan_point: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
-		node_log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
+		log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
 	fi
 	echo "✔ Fees updated successfully."
 	print_separator
@@ -822,7 +812,7 @@ fees_adjust() {
 	
 	lncli updatechanpolicy --base_fee_msat "$new_base" --fee_rate "$new_rate_decimal" \
 		--chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
-	node_log_action "Adjusted fees for $chan_point: Base $new_base msat, Rate $new_rate ppm ($action)"
+	log_action "Adjusted fees for $chan_point: Base $new_base msat, Rate $new_rate ppm ($action)"
 	echo "✔ Fees adjusted successfully."
 	print_separator
 }
@@ -1490,6 +1480,7 @@ pkg_post_install() {
 	# Record version & clean cache
 	echo "version=\"$PKG_VERSION\"" > ${PKG_DATA}/pkg.conf
 	rm -rf ${SRC_DIR}
+	log_action "Installed package: $PKG_NAME $PKG_VERSION"
 	unset PKG_NAME SRC_URL PKG_VERSION TARBALL SRC_DIR DL_URL
 }
 

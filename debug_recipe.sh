@@ -32,5 +32,11 @@ debug_install() {
 	echo "INSTALLED_PKGS=${INSTALLED_PKGS}"
 	echo "CACHE_DIR=${SLI_DIR}/cache"
 	echo "PKGS_LIST=${SLI_DIR}/packages.list"
+	
+	# List of installed files
+	echo -e "\n${CYAN}Package files:${NC} ${PKG_DATA}/files.list"
+	touch ${PKG_DATA}/files.list
+	
+	pkg_post_install
 }
 
