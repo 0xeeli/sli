@@ -146,7 +146,8 @@ print_separator() {
 check_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		echo -e " ✘ Error: ${RED}$1${NC} is required but not installed."
-		echo -e " * Try: sudo apt install $1  # On Debian/Ubuntu"
+		echo " * Try: sudo apt install <pkg>  # On Debian/Ubuntu"
+		echo " * Try: sli install <pkg>  # If it's a Lightning package"
 		echo "" && exit 1
 	fi
 }
@@ -189,6 +190,14 @@ sli_init() {
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	# Create an empty sli.conf to let user customize some variables/paths
 	touch ${SLI_DIR}/sli.conf
+	print_separator
+}
+
+# View Sli Wallet and Node logs
+sli_logs() {
+	echo "⚡️ SLi Packages, Wallet and Node Logs"
+	print_separator
+	cat ${SLI_LOG}
 	print_separator
 }
 
@@ -487,14 +496,6 @@ wallet_info() {
 	fi
 }
 
-# View SliWa logs
-wallet_logs() {
-	echo "⚡️ Wallet Logs"
-	print_separator
-	cat ${SLIWA_LOG}
-	print_separator
-}
-
 # Used by: service_start and service_restart (litd or lnd)
 wallet_db_exist() {
 	case "$service" in
@@ -778,8 +779,8 @@ fees_adjust() {
 	echo "⚡️ Dynamically Adjust Fees"
 	print_separator
 	echo "Select a channel to adjust:"
-	lncli listchannels | jq -r '.channels[] | "Channel: \(.channel_point) | Local: \(.local_balance) sat | Remote: \(.remote_balance.sat)"'
-
+	lncli listchannels | jq -r '.channels[]| "Channel: \(.channel_point)"'
+	#lncli listchannels | jq -r '.channels[]| "Channel: \(.channel_point) | Local: \(.local_balance) sat | Remote: \(.remote_balance.sat)"'
 	echo ""
 	read -p "Channel Point: " chan_point
 	if [ -z "$chan_point" ]; then
@@ -790,7 +791,7 @@ fees_adjust() {
 	current_rate=$(lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$chan_point\") | .chan_id")" | jq -r '.policy1.fee_rate_ppm')
 	echo "Current: Base Fee: $current_base msat | Fee Rate: $current_rate ppm"
 	echo ""
-	echo "${CYAN}Adjustment options:${NC}"
+	echo -e "${CYAN}Adjustment options:${NC}"
 	echo " --> Lower fees to boost traffic (e.g., halve current fees)"
 	echo " --> Raise fees to increase earnings or slow outbound liquidity drain"
 	echo ""
@@ -911,6 +912,7 @@ lit_install() {
 
 # Initialize LiTd
 lit_init() {
+	check_command "litd"
 	echo "⚡️ Lit Initialization"
 	print_separator
 	if [ ! -f "$LIT_CONF" ]; then
@@ -1330,7 +1332,7 @@ node_backup_extract() {
 
 	echo -e " * Decrypting: ${YELLOW}$(basename $BACKUP_FILE)${NC}"
 	gpg --batch --yes --passphrase-file "$WALLET_PASS" \
-		-o "$EXTRACTED_DIR/lnd_backup.tar.gz" -d "$BACKUP_FILE"
+		-o "$EXTRACTED_DIR/lnd_backup.tar.gz" -d "$BACKUP_FILE" || return 1
 
 	echo " * Extracting backup contents for inspection..."
 	tar -xzf "$EXTRACTED_DIR/lnd_backup.tar.gz" -C "$EXTRACTED_DIR"
@@ -1600,7 +1602,7 @@ fees() {
 wallet() {
 	case "$2" in
 		init) wallet_init "--header" ;;
-		logs) wallet_logs ;;
+		logs) sli_logs ;;
 		new) wallet_new_address ;;
 		send) wallet_send_onchain ;;
 		lsa|lsaddr|list-addresses) wallet_list_addresses ;;
@@ -1631,7 +1633,11 @@ handle_command() {
 		rs|restart) service_restart ${@} ;;
 		sc|show-config) config_show ${2} ;;
 		ed|edit) config_edit ${2} ;;
-		lg|logs) service_logs ${@} ;;
+		lg|logs) 
+			case "$2" in
+				sli|wallet|node|packages) sli_logs ;;
+				*) service_logs ${@} ;;
+			esac ;;
 		st|status) service_status ${@} ;;
 		# --- Node ---
 		nh|node-health) node_health ;;
