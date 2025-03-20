@@ -722,14 +722,8 @@ fees_check() {
 	check_command "jq"
 	echo "⚡️ Current Fee Policies"
 	print_separator
-	if [ -n "$1" ]; then
-		echo "Checking fees for channel: $1"
-		lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$1\") | .chan_id")" | \
-			jq -r '"Base Fee: \(.policy1.fee_base_msat) msat | Fee Rate: \(.policy1.fee_rate_ppm) ppm"'
-	else
-		echo "Listing fee policies for all open channels:"
-		lncli listchannels | jq -r '.channels[] | "Channel: \(.channel_point) | Base Fee: \(.local_policy.fee_base_msat) msat | Fee Rate: \(.local_policy.fee_rate_ppm) ppm"'
-	fi
+	lncli listchannels | jq -r '.channels[].chan_id' | xargs -I{} lncli getchaninfo {} | \
+		jq -r '"Channel ID: \(.channel_id) | Base Fee: \(.node1_policy.fee_base_msat // "N/A") msat | Fee Rate: \(.node1_policy.fee_rate_milli_msat // "N/A") ppm"'
 	print_separator
 }
 
@@ -762,14 +756,22 @@ fees_set() {
 	fee_rate_decimal=$(echo "scale=6; $fee_rate / 1000000" | bc)
 	if [ -z "$chan_point" ]; then
 		echo "Applying globally: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
-		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --min_htlc_msat 1000 --time_lock_delta 40
+		
+		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" \
+			--min_htlc_msat 500 --time_lock_delta 40 | \
+			jq -r 'if .failed_updates == [] then "✔ Fees updated successfully." else "Error occurred" end'
+		
 		log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
 	else
-		echo "Applying to channel $chan_point: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
-		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" --chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
+		echo "Applying to channel $chan_point"
+		echo " --> Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
+		
+		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" \
+			--chan_point "$chan_point" --min_htlc_msat 500 --time_lock_delta 40 | \
+			jq -r 'if .failed_updates == [] then "✔ Fees updated successfully." else "Error occurred" end'
+		
 		log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
 	fi
-	echo "✔ Fees updated successfully."
 	print_separator
 }
 
@@ -1353,8 +1355,11 @@ node_health() {
 		|| echo " --> litd: ${RED}Stopped${NC}"
 	echo -e "\nSync Status:"
 	lncli getinfo | jq -r '" --> Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
-	echo -e "\nConnected Peers:"
-	lncli listpeers | jq -r '.peers | length' | xargs echo " --> Peers:"
+	echo -en "\nConnected Peers: "
+	lncli listpeers | jq -r '.peers | length' # | xargs echo " --> Peers:"
+	# Open channel(s)
+	echo -n "Channels Count: "
+	lncli listchannels | jq -r '.channels[] | "\(.chan_id)"' | wc -l
 	print_separator
 }
 
