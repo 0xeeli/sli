@@ -34,6 +34,7 @@ INSTALLED_PKGS=${SLI_DIR}/packages
 CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
+AMBOSS_API="https://api.amboss.space/graphql"
 
 # Log files for SLi Wallet and Node actions
 SLI_LOG=${SLI_DIR}/sli.log
@@ -85,6 +86,7 @@ $(echo -e "${YELLOW}Tools:${NC}")
   nr|node-restore    Restore a GPG encrypted backup file
   ne|node-extract    Extract a GPG encrypted backup file
   sec|security-check Check files permissions created by SLi
+  ping-amboss        Ping Amboss Health Check API
   wa|wallet          Run 'sli wa' for wallet operations
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
@@ -1418,6 +1420,64 @@ node_health() {
 	print_separator
 }
 
+# A tool to ping Amboss Health Check to get nice graph. Should be run
+# as a systemd timer unit. 
+# See: https://old-docs.amboss.tech/docs/api-docs/monitoring/healthChecks
+ping_amboss() {
+	check_command "lncli"
+	date=$(date -u +%Y-%m-%dT%H:%M:%S%z)
+	signed=$(lncli signmessage "$date" | jq -r .signature)
+	json="{\"query\": \"mutation HealthCheck(\$signature: String!, \$timestamp: String!) { healthCheck(signature: \$signature, timestamp: \$timestamp) }\", \"variables\": {\"signature\": \"$signed\", \"timestamp\": \"$date\"}}"
+
+	echo "Pinging Amboss Health Check API..."
+	echo "${json}" | curl -s --data-binary @- -H "Content-Type: application/json" \
+		-X POST --output /dev/null ${AMBOSS_API}
+	log_action "Ping to Amboss Health Check API"
+	
+	# Cron is obsolete with Systemd timers. Let's creat a systemd timer
+	# to run a ping to Amboss each hour. Let user active it or not.
+	if [ ! -f "/etc/systemd/system/ping-amboss.service" ]; then
+		files_list="${INSTALLED_PKGS}/sli/files.list"
+		echo "Creating systemd service & timer files..."
+		cat << EOT >> ${CACHE_DIR}/ping-amboss.service
+[Unit]
+Description="Ping Amboss API"
+
+[Service]
+ExecStart=/usr/local/bin/sli ping-amboss
+EOT
+	# Timer
+	cat << EOT >> ${CACHE_DIR}/ping-amboss.timer
+[Unit]
+Description="Ping Amboss API every hour"
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*-*-* *:00:00
+Unit=ping-amboss.service
+
+[Install]
+WantedBy=multi-user.target
+EOT
+		sudo mv -f ${CACHE_DIR}/ping-amboss.* /etc/systemd/system
+		read -p "Do you wish to run a ping to Amboss each hour ? (yes/no) " answ
+		if [ "$answ" == "yes" ]; then
+			echo -e "${YELLOW}Enabling systemd timer to ping Amboss every hour...${NC}"
+			sudo systemctl start ping-amboss.timer
+			sudo systemctl enable ping-amboss.timer 2>/dev/null
+		else
+			echo -e "\nTo start Amboss ping timer:"
+			echo " --> sudo systemctl start ping-amboss.timer"
+			echo "To enable Amboss ping timer on each boot:"
+			echo " --> sudo systemctl enable ping-amboss.timer"
+		fi
+		# Track files so we remove them on 'sli remove sli'
+		echo -e "\nTracking installed files in: $files_list"
+		echo "$service" >> ${files_list}
+		echo "$timer" >> ${files_list}
+	fi
+}
+
 #
 # --- Packages Manager functions ---
 #
@@ -1713,6 +1773,7 @@ handle_command() {
 		nr|node-restore) node_backup_restore ${@} ;;
 		ne|node-extract) node_backup_extract ${@} ;;
 		sec|security-check) security_check ;;
+		ping-amboss) ping_amboss ;;
 		wa|wallet) wallet ${@} ;;
 		# --- Packages manager ---
 		'in'|install) pkg_install ${@} ;;
