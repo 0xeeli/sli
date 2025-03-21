@@ -849,6 +849,47 @@ fees_bump() {
 # --- Packages function: init + install + config files ---
 #
 
+# Lightning Terminal install function
+lnd_install() {
+
+	PKG_NAME="lnd"
+	SRC_URL="https://github.com/lightningnetwork/lnd/releases/download"
+	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
+	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
+	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
+
+	# Pre install
+	pkg_pre_install "lnd" "$PKG_VERSION"
+	pkg_download_tarball
+	pkg_extract_tarball
+
+	# Install to /usr/local/bin
+	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
+	echo " * Installing: ${PKG_NAME}"
+	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
+	echo " * Installing: lncli"
+	sudo cp -f "${SRC_DIR}/lncli" /usr/local/bin
+
+	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
+	echo "/usr/local/bin/lncli" >> ${PKG_DATA}/files.list
+
+	# LND/lncli will conflict with LiT Bundle, prefer this version.
+	# lnd-mode=remote can be set in lit.conf
+	if [ -d ${INSTALLED_PKGS}/lit ]; then
+		if grep -q "^lncli|" ${INSTALLED_PKGS}/lit/files.list; then
+			echo -e " * ${YELLOW}NOTE:${NC} Lncli already installed by lit --> Erasing"
+			sed -i '/^\/usr\/local\/bin\/lncli$/d' "${INSTALLED_PKGS}/lit/files.list"
+			# Store a backup of 'lit lncli' to be restored on lnd remove
+			#cp /usr/local/bin/lncli ${INSTALLED_PKGS}/lit
+		fi
+	fi
+
+	# Systemd service
+	config_service_unit "lnd" "Lightning Node Daemon"
+	pkg_post_install
+}
+
 # Basic and working lit.conf to get started
 lit_config_file() {
 	cat << EOT
@@ -909,8 +950,8 @@ lit_install() {
 	# Install to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	for bin in $(ls $SRC_DIR); do
-		# Handle conflict with loop, pool and friends
-		if [ ! -d ${INSTALLED_PKGS}/${bin} ]; then
+		# Handle conflict with loop, pool and lncli
+		if [ ! -d ${INSTALLED_PKGS}/${bin} ] && ! grep -q "${bin}" "${INSTALLED_PKGS}/lnd/files.list" 2>/dev/null; then
 			echo " * Installing: $bin"
 			sudo cp -f ${SRC_DIR}/${bin} /usr/local/bin
 			echo "/usr/local/bin/$bin" >> ${PKG_DATA}/files.list
@@ -1024,14 +1065,14 @@ loop_install() {
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
 	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
 
-	# Pool will conflict with LiT Bundle, prefer this version.
+	# Loop will conflict with LiT Bundle, prefer this version.
 	# loop-mode=disable can be set in lit.conf
 	if [ -d ${INSTALLED_PKGS}/lit ]; then
-		if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list; then
-			echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
+		if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list 2>/dev/null; then
+			echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Erasing"
 			sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
 			# Store a backup of 'lit loop' to be restored on loop remove
-			#cp -f /usr/local/bin/loop ${${INSTALLED_PKGS}}/lit/loop
+			#cp /usr/local/bin/loop ${INSTALLED_PKGS}/lit
 		fi
 	fi
 
@@ -1073,9 +1114,11 @@ pool_install() {
 	# Pool will conflict with LiT Bundle, prefer this version.
 	# pool-mode=disable can be set in lit.conf
 	if [ -d ${INSTALLED_PKGS}/lit ]; then
-		if grep -q ".*pool" ${INSTALLED_PKGS}/lit/files.list; then
-			echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Keeping this build"
+		if grep -q ".*pool" ${INSTALLED_PKGS}/lit/files.list 2>/dev/null; then
+			echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Erasing"
 			sed -i '/^\/usr\/local\/bin\/pool$/d' "${INSTALLED_PKGS}/lit/files.list"
+			# Store a backup of 'lit pool' to be restored on pool remove
+			#cp /usr/local/bin/pool ${INSTALLED_PKGS}/lit
 		fi
 	fi
 
@@ -1478,8 +1521,8 @@ pkg_pre_install() {
 			if [ -d "${INSTALLED_PKGS}/lit" ]; then
 				echo -e "The Lit package is installed and conflicts with: ${CYAN}${PKG_NAME}${NC}"
 				echo "Lit is a bundle that provides litd and lncli (LND command line interface)"
-				echo "If you plan to use LND as your node daemon, you can always install LiT"
-				echo "And then disable integrade mode, so you have LiT for UI and lnd as deamon"
+				echo "If you plan to use LND as your node daemon, you can always use LiT"
+				echo "You can use LiT remote mode, so you have LiT for UI and LND as deamon"
 				echo ""
 				read -p "Continue installation anyway ? (yes/no) " answer
 				[ "$answer" != "yes" ] && exit 0
