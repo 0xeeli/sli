@@ -19,13 +19,14 @@ ALBY_CONF="/etc/systemd/system/albyhub.service" # Use Environment=
 # --- Configurable Variables - Can be in a custom sli.conf ---
 
 SLI_DIR="$HOME/.sli"
+SLI_CONF="$SLI_DIR/sli.conf"
 WALLET_PASS="$LND_DIR/wallet.pass"
 BACKUP_DIR="$HOME/sli-backup"
 INVOICE_DIR="$HOME/sli-invoice"
 EDITOR="nano"
 
 # Load optional custom SLi config file
-[ -f "$SLI_DIR/sli.conf" ] && source "$SLI_DIR/sli.conf"
+[ -f "$SLI_CONF" ] && source ${SLI_CONF}
 
 # --- Global Variables ---
 
@@ -107,7 +108,8 @@ $(print_separator)
   lsa|list-addresses  List onchain wallet addresses
   bal|balance         Wallet balance
   inv|invoice         Generate a Lightning invoice
-  qri|qr-invoice      Generate a Lightning QR invoice (invoice.png)
+  qri|qr-invoice      Generate a Lightning QR invoice
+  rqr|remove-qr       Remove latest QR invoice files
   pay|pay-invoice     Pay a Lightning invoice
 EOT
 }
@@ -189,7 +191,9 @@ sli_init() {
 	
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	# Create an empty sli.conf to let user customize some variables/paths
-	touch ${SLI_DIR}/sli.conf
+	if [ ! -f "$SLI_CONF" ]; then
+		echo "# sli.conf: SLi configuration file" > ${SLI_CONF}
+	fi
 	print_separator
 }
 
@@ -377,7 +381,6 @@ config_edit() {
 	if [ ! -n "$1" ]; then
 		echo -e "Usage: $(basename $0) edit <pkg>\n" && exit 0
 	fi
-	echo $1
 	case "$1" in
 		albyhub|alby) # We use systemd unit to configure Alb Hub
 			config_edit_file "$ALBY_CONF"
@@ -649,6 +652,14 @@ wallet_qr_invoice() {
 	print_separator
 }
 
+# Manually delete invoice.png and invoice.txt, ca be done via CGI too
+wallet_remove_qr_invoice() {
+	echo "💸 Remove QR Invoice"
+	print_separator
+	echo "Removing latest invoice files..."
+	rm -f ${INVOICE_DIR}/*
+}
+
 # Pay a Lightning invoice directly
 wallet_pay_invoice() {
 	check_command "jq"
@@ -661,6 +672,7 @@ wallet_pay_invoice() {
 	else
 		echo " ✘ No invoice provided"
 	fi
+	echo ""
 	print_separator
 }
 
@@ -758,7 +770,7 @@ fees_set() {
 		echo "Applying globally: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" \
-			--min_htlc_msat 500 --time_lock_delta 40 | \
+			--min_htlc_msat 1000 --time_lock_delta 40 | \
 			jq -r 'if .failed_updates == [] then "✔ Fees updated successfully." else "Error occurred" end'
 		
 		log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
@@ -767,7 +779,7 @@ fees_set() {
 		echo " --> Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" \
-			--chan_point "$chan_point" --min_htlc_msat 500 --time_lock_delta 40 | \
+			--chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40 | \
 			jq -r 'if .failed_updates == [] then "✔ Fees updated successfully." else "Error occurred" end'
 		
 		log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
@@ -1019,7 +1031,7 @@ loop_install() {
 			echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Keeping this build"
 			sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
 			# Store a backup of 'lit loop' to be restored on loop remove
-			cp -f /usr/local/bin/loop ${${INSTALLED_PKGS}}/lit/loop
+			#cp -f /usr/local/bin/loop ${${INSTALLED_PKGS}}/lit/loop
 		fi
 	fi
 
@@ -1614,6 +1626,7 @@ wallet() {
 		bal|balance) wallet_balance ;;
 		inv|invoice) wallet_invoice ;;
 		qri|qr-invoice) wallet_qr_invoice ;;
+		rqr|remove-qr) wallet_remove_qr_invoice ;;
 		pay|pay-invoice) wallet_pay_invoice ;;
 		*) wallet_usage ;;
 	esac

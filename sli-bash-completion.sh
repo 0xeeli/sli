@@ -14,7 +14,7 @@ _sli_completions() {
 	commands="init start stop restart show-config edit logs status version node-health sign connect chan fees"
 	chan_cmds="open close list"
 	fees_cmds="check set adjust bump"
-	wallet_cmds="init logs new send list-addresses balance invoice qr-invoice pay-invoice"
+	wallet_cmds="init logs new send list-addresses balance invoice qr-invoice remove-qr pay-invoice"
 	tools="macaroon-hex gen-passwords node-backup node-restore node-extract security-check wallet"
 	pkgs_cmds="install upgrade list clean-cache remove"
 	daemons="albyhub litd lnd loopd poold"
