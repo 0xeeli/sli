@@ -35,6 +35,7 @@ CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
 AMBOSS_API="https://api.amboss.space/graphql"
+WALLET_DB="$LND_DIR/data/chain/bitcoin/mainnet/wallet.db"
 
 # Log files for SLi Wallet and Node actions
 SLI_LOG=${SLI_DIR}/sli.log
@@ -317,7 +318,7 @@ After=network.target
 [Service]
 ExecStart=/usr/local/bin/${1}
 User=$USER
-Type=simple
+Type=notify
 Restart=always
 RestartSec=60
 LimitNOFILE=8192
@@ -507,14 +508,28 @@ wallet_init() {
 		echo "⚡️ Wallet Initialization"
 		print_separator
 	fi
-	if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
+	if [ ! -f "$WALLET_DB" ]; then
+		
+		# Create or use existing wallet password
+		if [ ! -f "$WALLET_PASS" ]; then
+			read -p "Create a secure password ? (yes/no) " gen_walletpass
+			if [ "$gen_walletpass" == "yes" ]; then
+				password_init wallet-password
+			fi
+		else
+			echo "Found existing Wallet password:"
+			echo -e " --> ${YELLOW}$WALLET_PASS${NC}"
+			echo " --> $(cat $WALLET_PASS)"
+			echo ""
+		fi
+		
 		echo -e "Launching: ${GREEN}lncli create${NC}"
 		echo "🔒 Paste your generated or own Wallet password"
 		echo ""
 		lncli create
 	else
 		echo "A wallet database already exist:"
-		echo -e " --> ${YELLOW}$LND_DIR/data/chain/bitcoin/mainnet/wallet.db${NC}"
+		echo -e " --> ${YELLOW}${WALLET_DB}${NC}"
 	fi
 }
 
@@ -530,7 +545,7 @@ wallet_info() {
 wallet_db_exist() {
 	case "$service" in
 		litd|lnd)
-			if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
+			if [ ! -f "$WALLET_DB" ]; then
 				echo "🔒 No wallet.db file found."
 				return 1
 			fi ;;
@@ -876,6 +891,47 @@ fees_bump() {
 # --- Packages function: init + install + config files ---
 #
 
+# Basic and working lnd.conf to get started
+lnd_config_file() {
+	cat << EOT
+#
+# LND Configuration file: lnd.conf
+#
+
+# --- Wallet ---
+
+#wallet-unlock-password-file=${WALLET_PASS}
+#wallet-unlock-allow-create=true
+
+# --- Node ---
+
+# Set a nice name for your node
+alias=${USER}-LND
+
+[fee]
+
+# Optional URL for external fee estimation.
+fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
+
+[rpcmiddleware]
+
+# Used by Lit UI and other backend
+rpcmiddleware.enable=true
+
+[bitcoin]
+
+# Use a neutrino light back-end so we don't need a full ₿ node.
+bitcoin.node=neutrino
+
+# Connect to mainnet
+bitcoin.mainnet=1
+bitcoin.active=1
+
+# The seed DNS server(s) to use for initial peer discovery.
+bitcoin.dnsseed=nodes.lightning.directory,soa.nodes.lightning.directory
+EOT
+}
+
 # Lightning Terminal install function
 lnd_install() {
 
@@ -917,35 +973,84 @@ lnd_install() {
 	pkg_post_install
 }
 
+# Initialize LND
+lnd_init() {	
+	check_command "lnd"
+	echo "⚡️ LND Initialization"
+	print_separator
+	
+	# lnd.conf
+	if [ ! -f "$LND_CONF" ]; then
+		echo -e "Creating config file: ${YELLOW}$LND_CONF${NC}"
+		mkdir -p ${HOME}/.lnd && touch ${LND_CONF}
+		lnd_config_file > ${LND_CONF}
+		echo "Setting secure permissions: read only by $USER (0600)"
+		chmod 0600 ${LND_CONF}
+	else
+		echo -e "Config file already exist:"
+		echo -e " --> ${YELLOW}$LND_CONF${NC}"
+	fi
+	
+	# We can now start LND and create a Wallet if any
+	echo "" && service_start "start" "lnd"
+	if [ ! -f "$WALLET_DB" ]; then
+		echo ""
+		echo -e "${CYAN}Wallet Creation${NC}"
+		wallet_init
+	else
+		echo -e "\n🔒 Found Wallet database"
+		echo -e " --> ${YELLOW}$WALLET_DB${NC}"
+		[ -f "$WALLET_PASS" ] && echo -e " --> ${YELLOW}$WALLET_PASS${NC}"
+	fi
+	
+	# Wallet auto-unlock
+	if [ ! "$(grep ^wallet-unlock-password-file $LND_CONF)" ]; then
+		echo ""
+		echo -e "${CYAN}Wallet Auto-unlock${NC}"
+		echo "Let LND auto-unlock the wallet on startup (useful)"
+		echo ""
+		read -p "Do you wish to enable Wallet auto-unlock ? (yes/no) " auto_unlock
+		if [ "$auto_unlock" == "yes" ]; then
+			echo "Enabling auto-unlock in: $LND_CONF"
+			sed -i 's/#wallet-unlock-password-file=/wallet-unlock-password-file=/' "$LND_CONF"
+			sed -i 's/#wallet-unlock-allow-create=true/wallet-unlock-allow-create=true/' "$LND_CONF"
+			echo "Restarting lnd to apply auto-unlock..."
+			service_restart "restart" "lnd"
+		else
+			echo "Edit lnd.conf if you want auto-unlock or run again: sli init"
+		fi
+	else
+		echo "Wallet auto-unlock is enabled"
+	fi
+	print_separator
+}
+
 # Basic and working lit.conf to get started
 lit_config_file() {
 	cat << EOT
 #
-# LiTd Settings: lit.conf
+# LiTd Configuration file: lit.conf
 #
 uipassword=
 lnd-mode=integrated
 
-#
-# LND Settings
-#
+# --- Wallet ---
 
-# Wallet
 #lnd.wallet-unlock-password-file=${WALLET_PASS}
 #lnd.wallet-unlock-allow-create=true
 
+# --- Node ---
+
 # Set a nice name for your node
-lnd.alias=SLiNode
+lnd.alias=${USER}-Node
 
 # Optional URL for external fee estimation.
-lnd.feeurl=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
+lnd.fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
 
-# Used by Lit UI
+# Used by Lit UI and other backend
 lnd.rpcmiddleware.enable=true
 
-#
-# Bitcoin Configuration
-#
+# --- Bitcoin ---
 
 # Use a neutrino light back-end so we don't need a full ₿ node.
 lnd.bitcoin.node=neutrino
@@ -997,6 +1102,8 @@ lit_init() {
 	check_command "litd"
 	echo "⚡️ Lit Initialization"
 	print_separator
+	
+	# lit.conf
 	if [ ! -f "$LIT_CONF" ]; then
 		echo -e "Creating config file: ${YELLOW}$LIT_CONF${NC}"
 		mkdir -p ${HOME}/.lit && touch ${LIT_CONF}
@@ -1021,28 +1128,16 @@ lit_init() {
 		echo " --> uipassword= is set"
 	fi
 	
-	# We can now start litd and create a Wallet
+	# We can now start litd and create a Wallet if any
 	echo "" && service_start "start" "litd"
-	if [ ! -f "$LND_DIR/data/chain/bitcoin/mainnet/wallet.db" ]; then
+	if [ ! -f "$WALLET_DB" ]; then
 		echo ""
 		echo -e "${CYAN}Wallet Creation${NC}"
-		# Create or use existing wallet password
-		if [ ! -f "$WALLET_PASS" ]; then
-			read -p "Create a secure password ? (yes/no) " gen_walletpass
-			if [ "$gen_walletpass" == "yes" ]; then
-				password_init wallet-password
-			fi
-		else
-			echo "Found existing Wallet password:"
-			echo -e " --> ${YELLOW}$WALLET_PASS${NC}"
-			echo " --> $(cat $WALLET_PASS)"
-			echo ""
-		fi
-		# Now we can initialze wallet
 		wallet_init
 	else
-		echo "🔒 Found Wallet database"
-		echo -e " --> ${YELLOW}$WALLET_PASS${NC}"
+		echo -e "\n🔒 Found Wallet database"
+		echo -e " --> ${YELLOW}$WALLET_DB${NC}"
+		[ -f "$WALLET_PASS" ] && echo -e " --> ${YELLOW}$WALLET_PASS${NC}"
 	fi
 	
 	# Wallet auto-unlock
@@ -1064,6 +1159,7 @@ lit_init() {
 	else
 		echo "Wallet auto-unlock is enabled"
 	fi
+	print_separator
 }
 
 # This pool package provides loop and loopd (deamon). Conflict with Lit
@@ -1777,6 +1873,7 @@ handle_command() {
 			case "$2" in
 				wallet) wallet_init "--header" ;;
 				lit) lit_init ;;
+				lnd) lnd_init ;;
 				*) sli_init ;;
 			esac ;;
 		start) service_start ${@} ;;
