@@ -76,6 +76,7 @@ $(echo -e "${YELLOW}Node Manager:${NC}")
   nh|node-health     Node Health Check (Status, blocks, peers)
   sign               Sign message with your node private key
   connect            Connect to a remote peer
+  list-peers         List connected peers
   chan               Channel management (open, close, list)
   fees               Fee management (check, set, adjust, bump)
 
@@ -470,6 +471,30 @@ peer_connect() {
 	echo ""
 	read -p "Peer: " peer
 	[ -n "$peer" ] && lncli connect ${peer}
+}
+
+# List connected peers with IP and Alias
+peers_list() {
+    peers_json=$(lncli listpeers)
+    echo -e "⚡️ Connected peers: ${CYAN}$(echo "$peers_json" | jq -r '.peers | length')${NC}"
+    print_separator
+    echo ""
+    for peer in $(echo "$peers_json" | jq -r '.peers[].pub_key'); do
+        # Get peer info (pub_key and address) from listpeers
+        peer_info=$(echo "$peers_json" | jq -r --arg pk "$peer" '.peers[] | select(.pub_key == $pk) | "Pub Key: \(.pub_key)\nAddress: \(.address)"')
+        
+        # Get node alias from getnodeinfo
+        alias_output=$(lncli getnodeinfo "$peer" 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$alias_output" ]; then
+            alias_info=$(echo "$alias_output" | jq -r '.node | "Alias  : \(if .alias == null or .alias == "" then "Unspecified" else .alias end)"')
+        else
+            alias_info="Alias  : Unknown (Node not found)"
+        fi
+        
+        # Combine and output with an empty line
+        echo -e "$peer_info\n$alias_info\n"
+    done
+    print_separator
 }
 
 #
@@ -1408,6 +1433,7 @@ node_health() {
 	echo "⚡️ Node Health Check"
 	print_separator
 	echo "Service Status:"
+	# TODO if litd else lnd
 	systemctl is-active litd >/dev/null 2>&1 && echo -e " --> litd: ${GREEN}Running${NC}" \
 		|| echo " --> litd: ${RED}Stopped${NC}"
 	echo -e "\nSync Status:"
@@ -1415,8 +1441,11 @@ node_health() {
 	echo -en "\nConnected Peers: "
 	lncli listpeers | jq -r '.peers | length' # | xargs echo " --> Peers:"
 	# Open channel(s)
-	echo -n "Channels Count: "
+	echo -n "Channels Count : "
 	lncli listchannels | jq -r '.channels[] | "\(.chan_id)"' | wc -l
+	# Node size
+	echo -n "Node Size      : "
+	du -sh ${LND_DIR} | cut -d "	" -f 1
 	print_separator
 }
 
@@ -1445,6 +1474,7 @@ Description="Ping Amboss API"
 
 [Service]
 ExecStart=/usr/local/bin/sli ping-amboss
+User=$USER
 EOT
 	# Timer
 	cat << EOT >> ${CACHE_DIR}/ping-amboss.timer
@@ -1764,6 +1794,7 @@ handle_command() {
 		nh|node-health) node_health ;;
 		sign) sign_message ;;
 		connect) peer_connect ;;
+		list-peers) peers_list ;;
 		chan) chan ${@} ;;
 		fees) fees ${@} ;;
 		# --- Tools ---
