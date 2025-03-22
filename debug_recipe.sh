@@ -13,6 +13,7 @@ debug_install() {
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
 	
 	# Pre install
+	echo -e "Calling: ${YELLOW}pkg_pre_install()${NC}\n"
 	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
 	
 	# Check package recipe variables
@@ -26,7 +27,7 @@ debug_install() {
 	echo "DL_URL=${DL_URL}"
 	
 	# Check paths
-	echo -e "\n${CYAN}SLi paths${NC}"
+	echo -e "\n${CYAN}SLi Paths${NC}"
 	
 	echo "SLI_DIR=${SLI_DIR}"
 	echo "INSTALLED_PKGS=${INSTALLED_PKGS}"
@@ -34,9 +35,10 @@ debug_install() {
 	echo "PKGS_LIST=${SLI_DIR}/packages.list"
 	
 	# List of installed files
-	echo -e "\n${CYAN}Package files:${NC} ${PKG_DATA}/files.list"
+	echo -e "\n${CYAN}Package Files:${NC} ${PKG_DATA}/files.list"
 	touch ${PKG_DATA}/files.list
 	
+	echo -e "\nCalling: ${YELLOW}pkg_post_install()${NC}"
 	pkg_post_install
 }
 
