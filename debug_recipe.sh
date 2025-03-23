@@ -1,6 +1,6 @@
 #
 # Debug package: variables, functions and commands in a package recipe
-# Test: sli install debug (debug_recipe must be in the current dir)
+# Test: sli install debug (debug_recipe.sh must be in the current dir)
 #
 
 debug_install() {
@@ -33,11 +33,13 @@ debug_install() {
 	echo "CACHE_DIR=${CACHE_DIR}"
 	echo "PKGS_LIST=${SLI_DIR}/packages.list"
 	
-	# List of installed files
-	echo -e "\n${CYAN}Package Files:${NC} ${PKG_DATA}/files.list"
+	# Package data
+	echo -e "\n${CYAN}Package Data${NC}"
+	echo " --> ${PKG_DATA}/pkg.conf"
+	echo " --> ${PKG_DATA}/files.list"
 	touch ${PKG_DATA}/files.list
 	
-	# Post install will remove src dir and store pkg version
+	# Post install will remove src dir and store pkg version in ${PKG_DATA}/pkg.conf
 	echo -e "\nCalling: ${YELLOW}pkg_post_install()${NC}"
 	pkg_post_install
 }
