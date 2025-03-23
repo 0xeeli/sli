@@ -12,8 +12,7 @@ debug_install() {
 	SRC_DIR="${PKG_NAME}-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
 	
-	# Pre install
-	echo -e "Calling: ${YELLOW}pkg_pre_install()${NC}\n"
+	# Pre install: check if pkg is already installed
 	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
 	
 	# Check package recipe variables
@@ -31,14 +30,21 @@ debug_install() {
 	
 	echo "SLI_DIR=${SLI_DIR}"
 	echo "INSTALLED_PKGS=${INSTALLED_PKGS}"
-	echo "CACHE_DIR=${SLI_DIR}/cache"
+	echo "CACHE_DIR=${CACHE_DIR}"
 	echo "PKGS_LIST=${SLI_DIR}/packages.list"
 	
 	# List of installed files
 	echo -e "\n${CYAN}Package Files:${NC} ${PKG_DATA}/files.list"
 	touch ${PKG_DATA}/files.list
 	
+	# Post install will remove src dir and store pkg version
 	echo -e "\nCalling: ${YELLOW}pkg_post_install()${NC}"
 	pkg_post_install
+}
+
+debug_init() {
+	echo "⚡️ Debug Initialization"
+	print_separator
+	echo "Executed: debug_init()"
 }
 
