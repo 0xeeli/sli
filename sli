@@ -64,12 +64,12 @@ usage() {
 Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
 $(print_separator)
 $(echo -e "${YELLOW}Commands:${NC}")
-  init               Initialize: sli lit wallet
-  start              Start a daemon: litd
-  stop               Stop a daemon: litd
-  rs|restart         Restart a daemon: litd
-  sc|show-config     Display config file: lit.conf
-  ed|edit            Edit a config file: lit.conf
+  init               Initialize: sli lnd lit wallet
+  start              Start a service
+  stop               Stop a service
+  rs|restart         Restart a service
+  sc|show-config     Display config file
+  ed|edit            Edit a config file
   lg|logs            Show last logs for a service (default: 30 lines)
   st|status          Show service status
 
@@ -214,8 +214,8 @@ sli_logs() {
 sli_install() {
 
 	PKG_NAME="sli"
-	SRC_URL="https://github.com/0xeeli/sli/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/0xeeli/sli/releases/download"
 	TARBALL="${PKG_NAME}-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -304,10 +304,13 @@ service_status() {
 	print_separator
 }
 
-# Used by package install to generate a secure systemd unit
+# Used by package install to generate a secure systemd unit. Generic version,
+# some package may sed it or gen there own from a recipe.
+# Usage example: config_service_unit "lnd" "LND Daemon" "notify" 
 config_service_unit() {
 	service_unit="${1}.service"
 	service_desc="$2"
+	service_type="$3"
 	if [ ! -f /etc/systemd/system/${service_unit} ]; then
 		echo -e "${CYAN}Creating systemd service file:${NC} ${service_unit}"
 		cat << EOF | sudo tee /etc/systemd/system/${service_unit} > /dev/null
@@ -318,7 +321,7 @@ After=network.target
 [Service]
 ExecStart=/usr/local/bin/${1}
 User=$USER
-Type=notify
+Type=${service_type}
 Restart=always
 RestartSec=60
 LimitNOFILE=8192
@@ -936,8 +939,8 @@ EOT
 lnd_install() {
 
 	PKG_NAME="lnd"
-	SRC_URL="https://github.com/lightningnetwork/lnd/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/lightningnetwork/lnd/releases/download"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -969,7 +972,7 @@ lnd_install() {
 	fi
 
 	# Systemd service
-	config_service_unit "lnd" "Lightning Node Daemon"
+	config_service_unit "lnd" "Lightning Node Daemon" "notify"
 	pkg_post_install
 }
 
@@ -1068,8 +1071,8 @@ EOT
 lit_install() {
 
 	PKG_NAME="lit"
-	SRC_URL="https://github.com/lightninglabs/lightning-terminal/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/lightninglabs/lightning-terminal/releases/download"
 	TARBALL="lightning-terminal-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="lightning-terminal-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -1093,7 +1096,7 @@ lit_install() {
 	done
 
 	# Systemd service
-	config_service_unit "litd" "Lightning Terminal (LiT)"
+	config_service_unit "litd" "Lightning Terminal (LiT)" "notify"
 	pkg_post_install
 }
 
@@ -1167,8 +1170,8 @@ lit_init() {
 loop_install() {
 
 	PKG_NAME="loop"
-	SRC_URL="https://github.com/lightninglabs/loop/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/lightninglabs/loop/releases/download"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -1200,7 +1203,7 @@ loop_install() {
 	fi
 
 	# Systemd service
-	config_service_unit "loopd" "Loopd Off/On Chain Bridge"
+	config_service_unit "loopd" "Loopd Off/On Chain Bridge" "simple"
 
 	echo "Documentation: https://lightning.engineering/loop/"
 
@@ -1213,8 +1216,8 @@ loop_install() {
 pool_install() {
 
 	PKG_NAME="pool"
-	SRC_URL="https://github.com/lightninglabs/pool/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/lightninglabs/pool/releases/download"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -1246,7 +1249,7 @@ pool_install() {
 	fi
 
 	# Systemd service.
-	config_service_unit "poold" "Lightning Pool Daemon"
+	config_service_unit "poold" "Lightning Pool Daemon" "simple"
 
 	echo "Documentation: https://pool.lightning.engineering/"
 
@@ -1258,8 +1261,8 @@ pool_install() {
 lndconnect_install() {
 
 	PKG_NAME="lndconnect"
-	SRC_URL="https://github.com/LN-Zap/lndconnect/releases/download/"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/LN-Zap/lndconnect/releases/download/"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -1283,8 +1286,8 @@ lndconnect_install() {
 albyhub_install() {
 
 	PKG_NAME="albyhub"
-	SRC_URL="https://github.com/getAlby/hub/releases/download"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
+	SRC_URL="https://github.com/getAlby/hub/releases/download"
 	TARBALL="${PKG_NAME}-Server-Linux-x86_64.tar.bz2"
 	SRC_DIR="${PKG_NAME}-Server-Linux-x86_64"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
@@ -1308,7 +1311,7 @@ albyhub_install() {
 	done
 	
 	# Systemd service
-	config_service_unit "${PKG_NAME}" "Alby Hub Server"
+	config_service_unit "${PKG_NAME}" "Alby Hub Server" "simple"
 	
 	# Alby Hub don't use a config file, we need additional startup 
 	# environment variables. Let's sed!
@@ -1608,27 +1611,32 @@ EOT
 # --- Packages Manager functions ---
 #
 
-# First check sli itself, then load a custom receip, check for
-# a receipe in /usr/local/lib/sli (all packages install functions
-# may/will... be in this path) and finaly use built-in function.
+# We can install or init a package from a sourced recipe.sh script (providing
+# pkgname_install, pkgname_init, etc) from the curremt dir. Useful for development.
+# Check for a recipe in /usr/local/lib/sli (all packages install functions
+# may/will... be in this path). Example: pkg_source_recipe "pkg" "install"
+pkg_source_recipe() {
+	if [ -f ${1}_recipe.sh ]; then
+		source ${1}_recipe.sh
+		${1}_${2}
+		print_separator
+		echo "" && exit 0
+	# Let see if a package recipe.sh is installed
+	elif [ -f /usr/local/lib/sli/${1}_recipe.sh ]; then
+		source /usr/local/lib/sli/${1}_recipe.sh
+		${1}_${2}
+		print_separator
+		echo "" && exit 0
+	else
+		echo -e "No built-in package or recipe available for: ${RED}$1${NC}"
+	fi
+}
+
+# First check sli itself, then load a custom recipe, and finaly use 
+# built-in function.
 pkg_install() {
 	if [ "$2" == "sli" ]; then
 		echo "If you need to reinstall this version, run: sli init"
-		echo "" && exit 0
-	fi
-	# We can install a package from a plugin recipe.sh file (providing
-	# pkgname_install) from the curremt dir. Useful for development.
-	if [ -f ${2}_recipe.sh ]; then
-		source ${2}_recipe.sh
-		${2}_install
-		print_separator
-		echo "" && exit 0
-	fi
-	# Let see if a package receip.sh is installed
-	if [ -f /usr/local/lib/sli/${2}_recipe.sh ]; then
-		source /usr/local/lib/sli/${2}_recipe.sh
-		${2}_install
-		print_separator
 		echo "" && exit 0
 	fi
 	# Use built-in package
@@ -1636,8 +1644,8 @@ pkg_install() {
 		${2}_install
 		print_separator
 	else
-		echo "No package named: $2"
-	fi 	
+		pkg_source_recipe "$2" "install"
+	fi
 }
 
 pkg_get_version() {
@@ -1811,7 +1819,7 @@ pkg_remove() {
 	print_separator
 	for file in $(cat ${INSTALLED_PKGS}/${pkg}/files.list); do
 		echo " * Removing: $file"
-		sudo rm -f ${file}
+		sudo rm -rf ${file}
 	done
 	# Disable any enabled systemd boot symlink
 	service_check "$pkg" "$pkg"
@@ -1821,6 +1829,16 @@ pkg_remove() {
 	fi
 	rm -rf ${INSTALLED_PKGS}/${pkg}
 	print_separator
+}
+
+# Initialize a node, tool, package
+init() {
+	case "$2" in
+		wallet) wallet_init "--header" ;;
+		lnd|lit) ${2}_init ;;
+		"") sli_init ;;
+		*) pkg_source_recipe "$2" "init" ;;
+	esac
 }
 
 # Handle channel commands
@@ -1869,13 +1887,7 @@ handle_command() {
 	case "$1" in
 
 		version|--version) sli_version ;;
-		init)
-			case "$2" in
-				wallet) wallet_init "--header" ;;
-				lit) lit_init ;;
-				lnd) lnd_init ;;
-				*) sli_init ;;
-			esac ;;
+		init) init ${@} ;;
 		start) service_start ${@} ;;
 		stop) service_stop ${@} ;;
 		rs|restart) service_restart ${@} ;;
