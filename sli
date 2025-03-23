@@ -8,7 +8,7 @@
 #
 sli_version="v0.1.0"
 
-# -- Default Lightning paths (Sli dont use --lit-dir=, default is fine)
+# --- Default Lightning paths ---
 
 LIT_DIR="$HOME/.lit"
 LIT_CONF="$LIT_DIR/lit.conf"
@@ -1303,7 +1303,7 @@ albyhub_install() {
 	sudo cp -f ${SRC_DIR}/bin/${PKG_NAME} /usr/local/bin
 	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
 	
-	# Install to /usr/local/lib
+	# Install to /usr/local/lib (shared libraries.so)
 	for lib in $(ls ${SRC_DIR}/lib); do
 		echo " * Installing: $lib"
 		sudo cp -f ${SRC_DIR}/lib/${lib} /usr/local/lib
@@ -1613,14 +1613,14 @@ EOT
 
 # We can install or init a package from a sourced recipe.sh script (providing
 # pkgname_install, pkgname_init, etc) from the curremt dir. Useful for development.
-# Check for a recipe in /usr/local/lib/sli (all packages install functions
+# Check for a recipe in /usr/local/share/sli (all packages install functions
 # may/will... be in this path). Example: pkg_source_recipe "pkg"
 pkg_source_recipe() {
 	if [ -f ${1}_recipe.sh ]; then
 		source ${1}_recipe.sh
 	# Let see if a package _recipe.sh is installed
-	elif [ -f /usr/local/lib/sli/${1}_recipe.sh ]; then
-		source /usr/local/lib/sli/${1}_recipe.sh
+	elif [ -f /usr/local/share/sli/${1}_recipe.sh ]; then
+		source /usr/local/share/sli/${1}_recipe.sh
 	else
 		echo -e "No built-in package or recipe available for: ${RED}$1${NC}"
 		echo "" && exit 0
@@ -1640,6 +1640,9 @@ pkg_install() {
 		print_separator
 	else
 		pkg_source_recipe "$2"
+		if [ ! $(declare -F ${2}_install) ]; then
+			echo -e "Missing: ${2}_install in recipe\n" && exit 1
+		fi
 		${2}_install
 	fi
 }
@@ -1648,11 +1651,12 @@ pkg_get_version() {
 	grep "^${1}|" ${PKGS_LIST} | cut -d "|" -f 2
 }
 
-# Download pkg if needed
+# Download pkg if needed.
 pkg_download_tarball() {
 	if [ ! -f ${CACHE_DIR}/${TARBALL} ]; then
 		echo "Downloading: $TARBALL"
-		wget -q ${DL_URL} || { echo " ✘ Error downloading: ${TARBALL}"; exit 1; }
+		wget -q ${DL_URL} -O ${TARBALL} || \
+			{ echo " ✘ Error downloading: ${TARBALL}"; exit 1; }
 	else
 		echo "Using cache: ${TARBALL}"
 	fi
@@ -1682,6 +1686,7 @@ pkg_pre_install() {
 	PKG_NAME="$1"
 	PKG_VERSION="$2"
 	PKG_DATA=${INSTALLED_PKGS}/${PKG_NAME}
+	
 	# Already installed ?
 	if [ -f "${PKG_DATA}/pkg.conf" ]; then
 		# Set version=
@@ -1731,7 +1736,7 @@ pkg_pre_install() {
 pkg_post_install() {
 	# Record version & clean cache
 	echo "version=\"$PKG_VERSION\"" >> ${PKG_DATA}/pkg.conf
-	rm -rf ${SRC_DIR}
+	[ "$1" == "keep_src" ] || rm -rf ${SRC_DIR}
 	log_action "Installed package: $PKG_NAME $PKG_VERSION"
 	unset PKG_NAME SRC_URL PKG_VERSION TARBALL SRC_DIR DL_URL
 	print_separator
@@ -1769,13 +1774,14 @@ pkgs_upgrade() {
 	print_separator
 	pkgs_get_list
 	echo -e "Checking for packages update...\n"
+	log_action "Checking for packages update"
 	
 	# Simply check if version differ and upgrade since packages.list is
 	# maintained by OxeeLi GitHub repos it sould be fine.
 	for pkg in $(ls $INSTALLED_PKGS); do
 		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
 		available="$(grep "^${pkg}|" ${PKGS_LIST} | cut -d "|" -f 2)"
-		if [ "$version" != "$available" ]; then
+		if [ -n "$available" ] && [ "$version" != "$available" ]; then
 			echo -e "$pkg ${CYAN}$version${NC} --> ${GREEN}$available${NC}"
 			# We want to upgrade SLi at first
 			if [ "$pkg" == "sli" ]; then
@@ -1824,6 +1830,7 @@ pkg_remove() {
 		sudo systemctl disable ${service} 2>/dev/null # Be quit for nice SLi output
 	fi
 	rm -rf ${INSTALLED_PKGS}/${pkg}
+	log_action "Removed package: $pkg"
 	print_separator
 }
 
