@@ -337,7 +337,7 @@ EOF
 		# Track installed file
 		echo "/etc/systemd/system/${service_unit}" >> ${PKG_DATA}/files.list
 		sudo systemctl daemon-reload
-		read -p "Do you wish to start $1 on each boot ? (yes/no) " enable
+		read -p "Do you wish to enable $1 on each boot ? (yes/no) " enable
 		if [ "$enable" == "yes" ]; then
 			echo "Enabling $1 on boot time..."
 			sudo systemctl enable ${1} 2>/dev/null
@@ -1614,21 +1614,16 @@ EOT
 # We can install or init a package from a sourced recipe.sh script (providing
 # pkgname_install, pkgname_init, etc) from the curremt dir. Useful for development.
 # Check for a recipe in /usr/local/lib/sli (all packages install functions
-# may/will... be in this path). Example: pkg_source_recipe "pkg" "install"
+# may/will... be in this path). Example: pkg_source_recipe "pkg"
 pkg_source_recipe() {
 	if [ -f ${1}_recipe.sh ]; then
 		source ${1}_recipe.sh
-		${1}_${2}
-		print_separator
-		echo "" && exit 0
-	# Let see if a package recipe.sh is installed
+	# Let see if a package _recipe.sh is installed
 	elif [ -f /usr/local/lib/sli/${1}_recipe.sh ]; then
 		source /usr/local/lib/sli/${1}_recipe.sh
-		${1}_${2}
-		print_separator
-		echo "" && exit 0
 	else
 		echo -e "No built-in package or recipe available for: ${RED}$1${NC}"
+		echo "" && exit 0
 	fi
 }
 
@@ -1644,7 +1639,8 @@ pkg_install() {
 		${2}_install
 		print_separator
 	else
-		pkg_source_recipe "$2" "install"
+		pkg_source_recipe "$2"
+		${2}_install
 	fi
 }
 
@@ -1734,14 +1730,16 @@ pkg_pre_install() {
 # After install
 pkg_post_install() {
 	# Record version & clean cache
-	echo "version=\"$PKG_VERSION\"" > ${PKG_DATA}/pkg.conf
+	echo "version=\"$PKG_VERSION\"" >> ${PKG_DATA}/pkg.conf
 	rm -rf ${SRC_DIR}
 	log_action "Installed package: $PKG_NAME $PKG_VERSION"
 	unset PKG_NAME SRC_URL PKG_VERSION TARBALL SRC_DIR DL_URL
+	print_separator
 }
 
 pkgs_list() {
-	echo "⚡️ Installed packages"
+	count=$(ls $INSTALLED_PKGS | wc -l)
+	echo -e "⚡️ Installed packages: ${CYAN}${count}${NC}"
 	print_separator
 	[ -d "$INSTALLED_PKGS" ] || mkdir ${INSTALLED_PKGS}
 	for pkg in $(ls ${INSTALLED_PKGS}); do
@@ -1751,8 +1749,8 @@ pkgs_list() {
 	done
 	print_separator
 	
-	echo ""
-	echo "⚡️ Available packages"
+	count=$(cat $PKGS_LIST | wc -l)
+	echo -e "\n⚡️ Available packages: ${CYAN}${count}${NC}"
 	print_separator
 	# Ensure packages.list was downloaded
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
@@ -1770,8 +1768,7 @@ pkgs_upgrade() {
 	echo "⚡️ Packages Upgrade"
 	print_separator
 	pkgs_get_list
-	echo "Checking for packages update..."
-	echo ""
+	echo -e "Checking for packages update...\n"
 	
 	# Simply check if version differ and upgrade since packages.list is
 	# maintained by OxeeLi GitHub repos it sould be fine.
@@ -1812,8 +1809,7 @@ pkgs_upgrade() {
 pkg_remove() {
 	pkg="$1"
 	if [ ! -d ${INSTALLED_PKGS}/${pkg} ]; then
-		echo -e " ✘ Can't find package: ${RED}$pkg${NC}"
-		echo "" && exit 1
+		echo -e " ✘ Can't find package: ${RED}$pkg${NC}\n" && exit 1
 	fi
 	echo "⚡️ Removing package: $pkg"
 	print_separator
@@ -1833,11 +1829,26 @@ pkg_remove() {
 
 # Initialize a node, tool, package
 init() {
+	PKG_NAME="$2"
+	PKG_DATA=${INSTALLED_PKGS}/${2}
+	
 	case "$2" in
 		wallet) wallet_init "--header" ;;
 		lnd|lit) ${2}_init ;;
 		"") sli_init ;;
-		*) pkg_source_recipe "$2" "init" ;;
+		*)
+			# Don't run pkgname_init() if not installed
+			if [ ! -d "${INSTALLED_PKGS}/${2}" ]; then
+				echo -e "${CYAN}${2}${NC} must be installed before initialization" 
+				echo "" && exit 1
+			fi
+			pkg_source_recipe "$2"
+			if [ $(declare -F ${2}_init) ]; then
+				${2}_init 
+				print_separator 
+			else
+				echo -e "No init function available for: ${CYAN}$2${NC}"
+			fi ;;
 	esac
 }
 
