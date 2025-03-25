@@ -151,14 +151,14 @@ print_separator() {
 print_header() {
 	echo -e "$1"; print_separator
 }
+error() {
+	echo -e " ${RED}✘${NC} Error: $1\n"; exit 1
+}
 
 # Check if a command is available
 check_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
-		echo -e " ✘ Error: ${RED}$1${NC} is required but not installed."
-		echo " * Try: sudo apt install <pkg>  # On Debian/Ubuntu"
-		echo " * Try: sli install <pkg>  # If it's a Lightning package"
-		echo "" && exit 1
+		error "${RED}$1${NC} is required but not installed."
 	fi
 }
 
@@ -265,8 +265,7 @@ sli_install() {
 # Let user use lit in place of litd. also used to check file exist (ie litd.service)
 service_check() {
 	if [ -z "$2" ]; then
-		echo " ✘ Missing service name. Usage: sli $1 <service>"
-		echo "" && exit 1
+		error "Missing service name. Usage: sli $1 <service>"
 	fi
 	case "$2" in
 		lit|loop|pool) service="${2}d" ;;
@@ -630,8 +629,7 @@ wallet_send_onchain() {
 
 wallet_invoice_check() {
 	if [ -z "$invoice" ]; then
-		echo -e "\n ✘ Failed to generate invoice. Is your node running and wallet unlocked ?\n"
-		exit 1
+		error "Failed to generate invoice. Is your node running and wallet unlocked ?"
 	fi
 }
 
@@ -1431,8 +1429,7 @@ password_init() {
 node_backup_check_path() {
 	BACKUP_FILE="$1"
 	if [ -z "$BACKUP_FILE" ]; then
-		echo " ✘ Missing backup file path: $(basename $0) $1 <file.gpg>"
-		echo "" && exit 1
+		error "Missing backup file path: $(basename $0) $1 <file.gpg>"
 	fi
 }
 
@@ -1642,7 +1639,7 @@ pkg_install() {
 	else
 		pkg_source_recipe "$2"
 		if [ ! $(declare -F ${2}_install) ]; then
-			echo -e "Missing: ${2}_install in recipe\n" && exit 1
+			error "Missing: ${2}_install in recipe\n"
 		fi
 		${2}_install
 	fi
@@ -1652,12 +1649,12 @@ pkg_get_version() {
 	grep "^${1}|" ${PKGS_LIST} | cut -d "|" -f 2
 }
 
-# Download pkg if needed.
+# Download pkg if needed (we are in CACHE_DIR)
 pkg_download_tarball() {
-	if [ ! -f ${CACHE_DIR}/${TARBALL} ]; then
+	if [ ! -f ${TARBALL} ]; then
 		echo "Downloading tarball file..."
 		wget -q --show-progress ${DL_URL} -O ${TARBALL} || \
-			{ echo " ✘ Error downloading: ${TARBALL}"; exit 1; }
+			{ rm -f ${TARBALL}; error "Can't download ${TARBALL}"; }
 	else
 		echo "Using cache: ${TARBALL}"
 	fi
@@ -1678,7 +1675,7 @@ pkg_extract_tarball() {
 pkgs_get_list() {
 	mkdir -p ${CACHE_DIR} && cd ${CACHE_DIR}
 	echo "Fetching packages list from GitHub..."
-	wget -q ${PKGS_URL} || exit 1
+	wget -q ${PKGS_URL} || error "Can't fetch packages list"
 	mv -f packages.list ${SLI_DIR}
 }
 
@@ -1695,8 +1692,7 @@ pkg_pre_install() {
 		# Upgrade or custom version ?
 		if [ "$version" == "$PKG_VERSION" ]; then
 			echo -e "${CYAN}$PKG_NAME is already installed${NC}"
-			echo "Version: $version" && unset version
-			echo "" && exit 0
+			echo -e "Version: $version\n"; exit 0
 		fi
 	fi
 	
@@ -1812,9 +1808,7 @@ pkgs_upgrade() {
 # Remove system files keep config/data in ~/.*
 pkg_remove() {
 	pkg="$1"
-	if [ ! -d ${INSTALLED_PKGS}/${pkg} ]; then
-		echo -e " ✘ Can't find package: ${RED}$pkg${NC}\n" && exit 1
-	fi
+	[ -d ${INSTALLED_PKGS}/${pkg} ] || error "Can't find package: ${RED}$pkg${NC}"
 	print_header "⚡️ Removing package: $pkg"
 	for file in $(cat ${INSTALLED_PKGS}/${pkg}/files.list); do
 		echo " * Removing: $file"
@@ -1843,8 +1837,7 @@ init() {
 		*)
 			# Don't run pkgname_init() if not installed
 			if [ ! -d "${INSTALLED_PKGS}/${2}" ]; then
-				echo -e "${CYAN}${2}${NC} must be installed before initialization" 
-				echo "" && exit 1
+				error "${RED}${2}${NC} must be installed before initialization"
 			fi
 			pkg_source_recipe "$2"
 			if [ $(declare -F ${2}_init) ]; then
