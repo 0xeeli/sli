@@ -21,7 +21,7 @@ ALBY_CONF="/etc/systemd/system/albyhub.service" # Use Environment=
 SLI_DIR="$HOME/.sli"
 SLI_CONF="$SLI_DIR/sli.conf"
 WALLET_PASS="$LND_DIR/wallet.pass"
-BACKUP_DIR="$HOME/sli-backup"
+BACKUP_DIR="$HOME/sli-backups"
 INVOICE_DIR="$HOME/sli-invoice"
 EDITOR="nano"
 
@@ -47,7 +47,7 @@ EXTRACTED_DIR="$BACKUP_DIR/extracted"
 # Colors
 PURPLE='\033[1;35m'
 CYAN='\033[1;36m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 NC='\033[0m' # No color
@@ -64,7 +64,7 @@ usage() {
 Usage: $(basename $0) [command|tool] [pkg|arg] [arg]
 $(print_separator)
 $(echo -e "${YELLOW}Commands:${NC}")
-  init               Initialize: sli lnd lit wallet
+  init               Initialize a service, tool or package
   start              Start a service
   stop               Stop a service
   rs|restart         Restart a service
@@ -74,10 +74,11 @@ $(echo -e "${YELLOW}Commands:${NC}")
   st|status          Show service status
 
 $(echo -e "${YELLOW}Node Manager:${NC}")
-  nh|node-health     Node Health Check (Status, blocks, peers)
+  nh|node-health     Node Health report
   sign               Sign message with your node private key
   connect            Connect to a remote peer
-  list-peers         List connected peers
+  disconnect         Disconnect a remote peer
+  peers              List all connected peers
   chan               Channel management (open, close, list)
   fees               Fee management (check, set, adjust, bump)
 
@@ -171,6 +172,19 @@ log_action() {
 # --- Core Functions ---
 #
 
+# Install packages recipes. Used by sli_init and sli_install
+sli_install_recipes() {
+	if [ -d "recipes" ]; then
+		sudo mkdir -p /usr/local/share/sli
+		echo "/usr/local/share/sli" >> ${INSTALLED_PKGS}/${pkg}/files.list
+		for recipe in recipes/*; do
+			echo " * Installing: $(basename $recipe)"
+			sudo cp -f ${recipe} /usr/local/share/sli
+			echo "/usr/local/share/$(basename $recipe)" >> ${INSTALLED_PKGS}/${pkg}/files.list
+		done
+	fi
+}
+
 # Should be run at first usage - Self install ;-)
 sli_init() {
 	pkg="sli"
@@ -181,11 +195,14 @@ sli_init() {
 	echo -e "Storing curent SLi version: ${CYAN}$sli_version${NC}"
 	echo "version=\"$sli_version\"" > ${INSTALLED_PKGS}/${pkg}/pkg.conf
 	
-	echo -e " * Installing SLi: /usr/local/bin/${pkg}"
+	echo -e " * Installing: /usr/local/bin/${pkg}"
 	sudo cp -f ${0} /usr/local/bin 2>/dev/null
 	echo "/usr/local/bin/sli" >  ${INSTALLED_PKGS}/${pkg}/files.list
 	
-	# Install bash completion if you init from sli src
+	# Packages recipes
+	sli_install_recipes
+	
+	# Install bash completion if init from sli src
 	if [ -f "sli-bash-completion.sh" ]; then
 		comp="/usr/share/bash-completion/completions/sli"
 		echo " * Installing SLi bash completion..."
@@ -225,11 +242,14 @@ sli_install() {
 	pkg_download_tarball
 	pkg_extract_tarball
 
-	# Install to /usr/local/bin
+	# Install sli to /usr/local/bin
 	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
 	echo " * Installing: sli"
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo "/usr/local/bin/sli" > ${PKG_DATA}/files.list
+	
+	# Packages recipes to /usr/local/share/sli
+	sli_install_recipes
 	
 	# Install bash completion
 	comp="/usr/share/bash-completion/completions/sli"
@@ -308,14 +328,12 @@ service_status() {
 # some package may sed it or gen there own from a recipe.
 # Usage example: config_service_unit "lnd" "LND Daemon" "notify" 
 config_service_unit() {
-	service_unit="${1}.service"
-	service_desc="$2"
-	service_type="$3"
-	if [ ! -f /etc/systemd/system/${service_unit} ]; then
-		echo -e "${CYAN}Creating systemd service file:${NC} ${service_unit}"
-		cat << EOF | sudo tee /etc/systemd/system/${service_unit} > /dev/null
+	local unit="${1}.service" desc="$2" type="$3"
+	if [ ! -f /etc/systemd/system/${unit} ]; then
+		echo -e "${CYAN}Creating systemd service file:${NC} ${unit}"
+		cat << EOF | sudo tee /etc/systemd/system/${unit} > /dev/null
 [Unit]
-Description=${service_desc}
+Description=${desc}
 After=network.target
 
 [Service]
@@ -335,7 +353,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 WantedBy=multi-user.target
 EOF
 		# Track installed file
-		echo "/etc/systemd/system/${service_unit}" >> ${PKG_DATA}/files.list
+		echo "/etc/systemd/system/${unit}" >> ${PKG_DATA}/files.list
 		sudo systemctl daemon-reload
 		read -p "Do you wish to enable $1 on each boot ? (yes/no) " enable
 		if [ "$enable" == "yes" ]; then
@@ -470,11 +488,20 @@ sign_message() {
 
 # Connect to a remote peer
 peer_connect() {
-	echo "⚡️ Connect to a peer: <pubkey>@IP:port"
+	echo "⚡️ Connect to a peer. Enter: <pubkey>@IP:port"
 	print_separator
 	echo ""
 	read -p "Peer: " peer
 	[ -n "$peer" ] && lncli connect ${peer}
+}
+
+# Disconnect a remote peer
+peer_disconnect() {
+	echo "⚡️ Disconnect a peer. Enter: <pubkey>"
+	print_separator
+	echo ""
+	read -p "Peer: " peer
+	[ -n "$peer" ] && lncli disconnect ${peer}
 }
 
 # List connected peers with IP and Alias
@@ -1531,20 +1558,32 @@ node_health() {
 	check_command "jq"
 	echo "⚡️ Node Health Check"
 	print_separator
+	
+	# Node daemon
 	echo "Service Status:"
-	# TODO if litd else lnd
-	systemctl is-active litd >/dev/null 2>&1 && echo -e " --> litd: ${GREEN}Running${NC}" \
-		|| echo " --> litd: ${RED}Stopped${NC}"
+	if systemctl is-active litd >/dev/null 2>&1; then
+		echo -e " --> litd: ${GREEN}Running${NC}"
+	elif systemctl is-active lnd >/dev/null 2>&1; then
+		echo -e " --> lnd: ${GREEN}Running${NC}"
+	else
+		echo -e " --> node: ${RED}Stopped${NC}"
+	fi
+	
+	# Sync status
 	echo -e "\nSync Status:"
 	lncli getinfo | jq -r '" --> Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
+	
+	# Connected peers
 	echo -en "\nConnected Peers: "
 	lncli listpeers | jq -r '.peers | length' # | xargs echo " --> Peers:"
+	
 	# Open channel(s)
 	echo -n "Channels Count : "
 	lncli listchannels | jq -r '.channels[] | "\(.chan_id)"' | wc -l
+	
 	# Node size
 	echo -n "Node Size      : "
-	du -sh ${LND_DIR} | cut -d "	" -f 1
+	du -sh ${LND_DIR} | awk '{ print $1 }'
 	print_separator
 }
 
@@ -1637,7 +1676,6 @@ pkg_install() {
 	# Use built-in package
 	if [ $(declare -F ${2}_install) ]; then
 		${2}_install
-		print_separator
 	else
 		pkg_source_recipe "$2"
 		if [ ! $(declare -F ${2}_install) ]; then
@@ -1654,8 +1692,8 @@ pkg_get_version() {
 # Download pkg if needed.
 pkg_download_tarball() {
 	if [ ! -f ${CACHE_DIR}/${TARBALL} ]; then
-		echo "Downloading: $TARBALL"
-		wget -q ${DL_URL} -O ${TARBALL} || \
+		echo "Downloading tarball file..."
+		wget -q --show-progress ${DL_URL} -O ${TARBALL} || \
 			{ echo " ✘ Error downloading: ${TARBALL}"; exit 1; }
 	else
 		echo "Using cache: ${TARBALL}"
@@ -1921,7 +1959,8 @@ handle_command() {
 		nh|node-health) node_health ;;
 		sign) sign_message ;;
 		connect) peer_connect ;;
-		list-peers) peers_list ;;
+		disconnect) peer_disconnect ;;
+		peers) peers_list ;;
 		chan) chan ${@} ;;
 		fees) fees ${@} ;;
 		# --- Tools ---
