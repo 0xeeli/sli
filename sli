@@ -148,6 +148,9 @@ sli_version() { echo "SLi version: $sli_version"; }
 print_separator() {
 	echo -e "${PURPLE}--------------------------------------------------------------------------------${NC}"
 }
+print_header() {
+	echo -e "$1"; print_separator
+}
 
 # Check if a command is available
 check_command() {
@@ -188,8 +191,7 @@ sli_install_recipes() {
 # Should be run at first usage - Self install ;-)
 sli_init() {
 	pkg="sli"
-	echo "⚡️ SLi Initialization"
-	print_separator
+	print_header "⚡️ SLi Initialization"
 	echo -e "Creating data structure in: ${YELLOW}$SLI_DIR${NC}"
 	mkdir -p ${INSTALLED_PKGS}/${pkg} ${CACHE_DIR}
 	echo -e "Storing curent SLi version: ${CYAN}$sli_version${NC}"
@@ -205,7 +207,7 @@ sli_init() {
 	# Install bash completion if init from sli src
 	if [ -f "sli-bash-completion.sh" ]; then
 		comp="/usr/share/bash-completion/completions/sli"
-		echo " * Installing SLi bash completion..."
+		echo " * Installing: SLi bash completion"
 		sudo cp -f sli-bash-completion.sh ${comp}
 		echo "$comp" >> ${INSTALLED_PKGS}/${pkg}/files.list
 	fi
@@ -220,8 +222,7 @@ sli_init() {
 
 # View Sli Wallet and Node logs
 sli_logs() {
-	echo "⚡️ SLi Packages, Wallet and Node Logs"
-	print_separator
+	print_header "⚡️ SLi Packages, Wallet and Node Logs"
 	cat ${SLI_LOG}
 	print_separator
 }
@@ -308,8 +309,7 @@ service_restart() {
 service_logs() {
 	local lines="${3:-30}"
 	service_check ${@}
-	echo -e "⚡️ Showing last $lines lines of logs for: ${CYAN}${service}${NC}"
-	print_separator
+	print_header "⚡️ Showing last $lines lines of logs for: ${CYAN}${service}${NC}"
 	journalctl -q -u "$service" -n "$lines" --no-pager
 	print_separator
 }
@@ -317,8 +317,7 @@ service_logs() {
 # View service/daemon status
 service_status() {
 	service_check ${@}
-	echo -e "⚡️ Service status for: ${CYAN}${service}${NC}"
-	print_separator
+	print_header "⚡️ Service status for: ${CYAN}${service}${NC}"
 	script -q -c "systemctl status ${service} --no-pager" /dev/null | sed '/^\s*└─/q'
 	stty sane # Restore terminal settings
 	print_separator
@@ -377,8 +376,7 @@ config_show() {
 	if [ ! -n "$1" ]; then
 		echo -e "Usage: $(basename $0) show-config <pkg>\n" && exit 0
 	fi
-	echo -e "⚡️ Configuration file for: ${CYAN}$1${NC}"
-	print_separator
+	print_header "⚡️ Configuration file for: ${CYAN}$1${NC}"
 	case "$1" in
 		albyhub|alby) config_show_file "$ALBY_CONF" ;;
 		lit) config_show_file "$LIT_CONF" ;;
@@ -420,8 +418,7 @@ config_edit() {
 
 # We check the files created by SLi
 security_check() {
-	echo "⚡️ Security Check on SLi-Created Files"
-	print_separator
+	print_header "⚡️ Security Check on SLi-Created Files"
 	user=$(whoami)
 
 	# List of files to check
@@ -476,20 +473,18 @@ security_check() {
 
 # Sing a message in interactive mode by the node’s identity private key
 sign_message() {
-	echo "💬 Sing a message"
-	print_separator && echo ""
+	print_header "💬 Sing a message"; echo ""
 	read -p "Message to sing: " message
 	echo -e "\n${CYAN}Signature:${NC}\n"
 	if [ -n "$message" ]; then
 		lncli signmessage "$message" | jq -r '.signature'
 	fi
-	echo "" && print_separator
+	print_separator
 }
 
 # Connect to a remote peer
 peer_connect() {
-	echo "⚡️ Connect to a peer. Enter: <pubkey>@IP:port"
-	print_separator
+	print_header "⚡️ Connect to a peer. Enter: <pubkey>@IP:port"
 	echo ""
 	read -p "Peer: " peer
 	[ -n "$peer" ] && lncli connect ${peer}
@@ -497,8 +492,7 @@ peer_connect() {
 
 # Disconnect a remote peer
 peer_disconnect() {
-	echo "⚡️ Disconnect a peer. Enter: <pubkey>"
-	print_separator
+	print_header "⚡️ Disconnect a peer. Enter: <pubkey>"
 	echo ""
 	read -p "Peer: " peer
 	[ -n "$peer" ] && lncli disconnect ${peer}
@@ -507,8 +501,7 @@ peer_disconnect() {
 # List connected peers with IP and Alias
 peers_list() {
     peers_json=$(lncli listpeers)
-    echo -e "⚡️ Connected peers: ${CYAN}$(echo "$peers_json" | jq -r '.peers | length')${NC}"
-    print_separator
+    print_header "⚡️ Connected peers: ${CYAN}$(echo "$peers_json" | jq -r '.peers | length')${NC}"
     echo ""
     for peer in $(echo "$peers_json" | jq -r '.peers[].pub_key'); do
         # Get peer info (pub_key and address) from listpeers
@@ -535,8 +528,7 @@ peers_list() {
 # Create a wallet if none
 wallet_init() {
 	if [ "$1" == "--header" ]; then
-		echo "⚡️ Wallet Initialization"
-		print_separator
+		print_header "⚡️ Wallet Initialization"
 	fi
 	if [ ! -f "$WALLET_DB" ]; then
 		
@@ -588,8 +580,7 @@ wallet_db_exist() {
 # Create a new onchain wallet
 wallet_new_address() {
 	check_command "jq"
-	echo "⚡️ New ₿TC Address for onchain funds (p2wkh)"
-	print_separator
+	print_header "⚡️ New ₿TC Address for onchain funds (p2wkh)"
 	addr=$(lncli newaddress p2wkh | jq -r '.address')
 	if [ -n "$addr" ]; then
 		echo "New ₿TC address: $addr"
@@ -603,8 +594,7 @@ wallet_new_address() {
 # Parse JSON output with jq to nicely display wallet(s) and show balance(s)
 wallet_list_addresses() {
 	check_command "jq"
-	echo "⚡️ Onchain ₿TC Addresses"
-	print_separator
+	print_header "⚡️ Onchain ₿TC Addresses"
 	# Exclude addresses without funds ?
 	#lncli wallet addresses list | jq -r '.account_with_addresses[].addresses[] | select(.balance != "0") | "\(.address) \(.balance)"'
 	lncli wallet addresses list | jq -r '.account_with_addresses[].addresses[] | "\(.address) \(.balance)"'
@@ -613,8 +603,7 @@ wallet_list_addresses() {
 
 wallet_balance() {
 	check_command "jq"
-	echo "⚡️ Wallet Balances"
-	print_separator
+	print_header "⚡️ Wallet Balances"
 	echo "On-chain Balance:"
 	lncli walletbalance | jq -r '"\(.confirmed_balance) sat (confirmed) / \(.unconfirmed_balance) sat (unconfirmed)"'
 	echo -e "\nChannel Balance:"
@@ -624,8 +613,7 @@ wallet_balance() {
 
 # Let send some sats
 wallet_send_onchain() {
-	echo "💰 Send ₿TC Onchain (Amount in sat)"
-	print_separator && echo ""
+	print_header "💰 Send ₿TC Onchain (Amount in sat)"; echo ""
 	read -p "Address: " addr
 	read -p "Amount : " amt
 	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
@@ -650,9 +638,7 @@ wallet_invoice_check() {
 # Generate interactively a Lightning invoice
 wallet_invoice() {
 	check_command "jq"
-	echo "⚡️ Generate Lightning Invoice"
-	print_separator
-	echo ""
+	print_header "⚡️ Generate Lightning Invoice"; echo ""
 	read -p "Amount (sat, default: 1000): " amt
 	amt=${amt:-1000}
 	read -p "Memo (optional): " memo
@@ -682,9 +668,7 @@ wallet_qr_invoice() {
 	local invoice_qr="${INVOICE_DIR}/invoice.png"
 	local invoice_file="${INVOICE_DIR}/invoice.txt"
 
-	echo "⚡️ Generate Lightning Invoice with QR Code"
-	print_separator
-	echo ""
+	print_header "⚡️ Generate Lightning Invoice with QR Code"; echo ""
 	read -p "Amount (sat, default: 1000): " amt
 	amt=${amt:-1000}
 	read -p "Memo (optional): " memo
@@ -726,8 +710,7 @@ wallet_qr_invoice() {
 
 # Manually delete invoice.png and invoice.txt, ca be done via CGI too
 wallet_remove_qr_invoice() {
-	echo "💸 Remove QR Invoice"
-	print_separator
+	print_header "💸 Remove QR Invoice"
 	echo "Removing latest invoice files..."
 	rm -f ${INVOICE_DIR}/*
 }
@@ -735,9 +718,7 @@ wallet_remove_qr_invoice() {
 # Pay a Lightning invoice directly
 wallet_pay_invoice() {
 	check_command "jq"
-	echo "💸 Pay a Lightning Invoice"
-	print_separator
-	echo ""
+	print_header "💸 Pay a Lightning Invoice"; echo ""
 	read -p "Invoice (bolt11): " invoice
 	if [ -n "$invoice" ]; then
 		lncli payinvoice "$invoice"
@@ -754,8 +735,7 @@ wallet_pay_invoice() {
 
 # Open a channel
 chan_open() {
-	echo "🔗 Open a Channel (Amount in sat)"
-	print_separator && echo ""
+	print_header "🔗 Open a Channel (Amount in sat)"; echo ""
 	read -p "Node ID: " node
 	read -p "Amount : " amt
 	read -p "Fee rate (sats/vB): " fee
@@ -770,8 +750,7 @@ chan_open() {
 # Close a channel cooperatively or forced
 chan_close() {
 	check_command "jq"
-	echo "🔗 Close a Lightning Channel"
-	print_separator
+	print_header "🔗 Close a Lightning Channel"
 	echo "Open channels:"
 	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey) | Chan ID: \(.channel_point)"'
 	echo ""
@@ -791,8 +770,7 @@ chan_close() {
 # List open channels
 chan_list() {
 	check_command "jq"
-	echo "🔗 Open Lightning Channels"
-	print_separator
+	print_header "🔗 Open Lightning Channels"
 	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey)\nCapacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
 	print_separator
 }
@@ -804,8 +782,7 @@ chan_list() {
 # Check the current fees policy
 fees_check() {
 	check_command "jq"
-	echo "⚡️ Current Fee Policies"
-	print_separator
+	print_header "⚡️ Current Fee Policies"
 	lncli listchannels | jq -r '.channels[].chan_id' | xargs -I{} lncli getchaninfo {} | \
 		jq -r '"Channel ID: \(.channel_id) | Base Fee: \(.node1_policy.fee_base_msat // "N/A") msat | Fee Rate: \(.node1_policy.fee_rate_milli_msat // "N/A") ppm"'
 	print_separator
@@ -815,8 +792,7 @@ fees_check() {
 fees_set() {
 	check_command "jq"
 	check_command "bc"
-	echo "⚡️ Set Routing Fees"
-	print_separator
+	print_header "⚡️ Set Routing Fees"
 	echo "Options:"
 	echo " --> Leave blank for global settings (all channels)"
 	echo " --> Enter a channel point (e.g., txid:output) for a specific channel"
@@ -862,8 +838,7 @@ fees_set() {
 # Dynamically adjust fees
 fees_adjust() {
 	check_command "jq"
-	echo "⚡️ Dynamically Adjust Fees"
-	print_separator
+	print_header "⚡️ Dynamically Adjust Fees"
 	echo "Select a channel to adjust:"
 	lncli listchannels | jq -r '.channels[]| "Channel: \(.channel_point)"'
 	#lncli listchannels | jq -r '.channels[]| "Channel: \(.channel_point) | Local: \(.local_balance) sat | Remote: \(.remote_balance.sat)"'
@@ -906,8 +881,7 @@ fees_adjust() {
 
 # Speed up a transaction
 fees_bump() {
-	echo "⚡️ Bump (speed up) a transaction"
-	print_separator
+	print_header "⚡️ Bump (speed up) a transaction"
 	echo "Make sure your transaction is flaged RBF (Replace-by-fee)"
 	echo ""
 	read -p "TX id: " tx
@@ -1006,8 +980,7 @@ lnd_install() {
 # Initialize LND
 lnd_init() {	
 	check_command "lnd"
-	echo "⚡️ LND Initialization"
-	print_separator
+	print_header "⚡️ LND Initialization"
 	
 	# lnd.conf
 	if [ ! -f "$LND_CONF" ]; then
@@ -1130,8 +1103,7 @@ lit_install() {
 # Initialize LiTd
 lit_init() {
 	check_command "litd"
-	echo "⚡️ Lit Initialization"
-	print_separator
+	print_header "⚡️ Lit Initialization"
 	
 	# lit.conf
 	if [ ! -f "$LIT_CONF" ]; then
@@ -1358,12 +1330,11 @@ Environment=\"LDK_GOSSIP_SOURCE=\"" "/etc/systemd/system/${PKG_NAME}.service"
 
 # Convert macaroon to HEX
 macaroon_to_hex() {
+	check_command "xxd"
 	local macaroon="${1:-admin}"
 	local macaroon="${macaroon%.*}"
 	local path="${LND_DIR}/data/chain/bitcoin/mainnet/${macaroon}.macaroon"
-	echo -e "⚡️ Convert ${CYAN}$macaroon${NC} macaroon to HEX"
-	print_separator
-	check_command xxd
+	print_header "⚡️ Convert ${CYAN}$macaroon${NC} macaroon to HEX"
 	if [ ! -f "${path}" ]; then
 		echo "No macaroon found at:"
 		echo " --> ${path}"
@@ -1387,9 +1358,8 @@ passwords_gen() {
 
 # Change passwords for Lit UI and/or Wallet
 passwords_change() {
-	echo "⚡️ Change Passwords using: pwgen or openssl"
-	print_separator
-	echo ""
+	print_header "⚡️ Change Passwords using: pwgen or openssl"; echo ""
+	
 	passwords_gen ${2}
 	echo "Wallet --> ${wallet_pwd}"
 	echo "Lit UI --> ${ui_pwd}"
@@ -1468,10 +1438,8 @@ node_backup_check_path() {
 
 # Function to create a backup
 node_backup() {
-
 	check_command "gpg"
-	echo "⚡️ Creating Node Backup"
-	print_separator
+	print_header "⚡️ Creating Node Backup"
 	# Ensure backup directory exists
 	echo " * Preparing backup directories..."
 	mkdir -p "$BACKUP_DIR" "$TMP_BACKUP_DIR"
@@ -1504,10 +1472,8 @@ node_backup() {
 
 # Function to restore a backup
 node_backup_restore() {
-
 	node_backup_check_path "$2"
-	echo "⚡️ Restoring Node Backup"
-	print_separator
+	print_header "⚡️ Restoring Node Backup"
 	# Ensure backup directory exists
 	echo " * Preparing to restore backup..."
 	mkdir -p "$BACKUP_DIR" "$TMP_BACKUP_DIR"
@@ -1532,11 +1498,9 @@ node_backup_restore() {
 
 # Function to extract a backup for inspection
 node_backup_extract() {
-
 	node_backup_check_path "$2"
-	echo "⚡️ Extracting Node Backup"
-	print_separator
-	# Ensure backup directory exists
+	print_header "⚡️ Extracting Node Backup"
+	# Ensure extract directory exists
 	echo " * Preparing for extraction..."
 	mkdir -p "$BACKUP_DIR" "$EXTRACTED_DIR"
 
@@ -1556,8 +1520,7 @@ node_backup_extract() {
 # To be improved if/when LND is integrated
 node_health() {
 	check_command "jq"
-	echo "⚡️ Node Health Check"
-	print_separator
+	print_header "⚡️ Node Health Check"
 	
 	# Node daemon
 	echo "Service Status:"
@@ -1762,8 +1725,7 @@ pkg_pre_install() {
 			fi ;;
 	esac
 	
-	echo "⚡️ Installing: $PKG_NAME $PKG_VERSION"
-	print_separator
+	print_header "⚡️ Installing: $PKG_NAME $PKG_VERSION"
 	# Continuing for install/upgrade - We work in SLi cache directory
 	mkdir -p ${PKG_DATA} ${CACHE_DIR} && cd ${CACHE_DIR}
 	# Keep track of previous installed files
@@ -1782,9 +1744,9 @@ pkg_post_install() {
 
 pkgs_list() {
 	count=$(ls $INSTALLED_PKGS | wc -l)
-	echo -e "⚡️ Installed packages: ${CYAN}${count}${NC}"
-	print_separator
-	[ -d "$INSTALLED_PKGS" ] || mkdir ${INSTALLED_PKGS}
+	print_header "⚡️ Installed packages: ${CYAN}${count}${NC}"
+	# Installed packages
+	[ -d "$INSTALLED_PKGS" ] || mkdir -p ${INSTALLED_PKGS}
 	for pkg in $(ls ${INSTALLED_PKGS}); do
 		source ${INSTALLED_PKGS}/${pkg}/pkg.conf
 		echo "$pkg $version" | awk '{ printf "%-15s %-30s\n", $1, $2}'
@@ -1793,8 +1755,7 @@ pkgs_list() {
 	print_separator
 	
 	count=$(cat $PKGS_LIST | wc -l)
-	echo -e "\n⚡️ Available packages: ${CYAN}${count}${NC}"
-	print_separator
+	print_header "\n⚡️ Available packages: ${CYAN}${count}${NC}"
 	# Ensure packages.list was downloaded
 	[ -f "$PKGS_LIST" ] || pkgs_get_list
 	for pkg in $(cat ${PKGS_LIST}); do
@@ -1808,8 +1769,7 @@ pkgs_list() {
 # Downlad a packages.list, compare installed version to the list
 # upgrade everything
 pkgs_upgrade() {
-	echo "⚡️ Packages Upgrade"
-	print_separator
+	print_header "⚡️ Packages Upgrade"
 	pkgs_get_list
 	echo -e "Checking for packages update...\n"
 	log_action "Checking for packages update"
@@ -1855,8 +1815,7 @@ pkg_remove() {
 	if [ ! -d ${INSTALLED_PKGS}/${pkg} ]; then
 		echo -e " ✘ Can't find package: ${RED}$pkg${NC}\n" && exit 1
 	fi
-	echo "⚡️ Removing package: $pkg"
-	print_separator
+	print_header "⚡️ Removing package: $pkg"
 	for file in $(cat ${INSTALLED_PKGS}/${pkg}/files.list); do
 		echo " * Removing: $file"
 		sudo rm -rf ${file}
