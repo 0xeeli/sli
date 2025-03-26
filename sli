@@ -34,6 +34,7 @@ INSTALLED_PKGS=${SLI_DIR}/packages
 CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_RECIPES="/usr/local/share/sli"
+PKGS_RECIPES_URL="https://raw.githubusercontent.com/0xeeli/sli/main/recipes"
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/main/packages.list"
 AMBOSS_API="https://api.amboss.space/graphql"
 WALLET_DB="$LND_DIR/data/chain/bitcoin/mainnet/wallet.db"
@@ -94,9 +95,10 @@ $(echo -e "${YELLOW}Tools:${NC}")
   wa|wallet          Run 'sli wa' for wallet operations
 
 $(echo -e "${YELLOW}Packages Manager:${NC}")
+  ls|list            List installed and available packages
   in|install         Install a package
   up|upgrade         Upgrade installed packages
-  ls|list            List installed and available packages
+  gr|get-recipe      Get latest package recipe from GitHub
   cc|clean-cache     Remove downloaded packages tarball
   rm|remove          Remove a package
 EOT
@@ -1601,6 +1603,19 @@ EOT
 # --- Packages Manager functions ---
 #
 
+# Packages recipes can be downloaded individualy since they can be updated
+# or added without a new SLi release. Usage: pkg_get_recipe "pkgname" "--no-header"
+pkg_get_recipe() {
+	local package="$1"
+	# Check if package exist
+	if ! grep -q "^${package}|" ${PKGS_LIST}; then
+		error "Package $package don't exist"
+	fi
+	[ "$2" == "--no-header" ] || print_header "📦 Get $package package recipe"
+	echo "Downloading recipe..."
+	wget -q --show-progress ${PKGS_RECIPES_URL}/${package}_recipe.sh
+}
+
 # We can install or init a package from a sourced recipe.sh script (providing
 # pkgname_install, pkgname_init, etc) from the curremt dir. Useful for development.
 # Check for a recipe in /usr/local/share/sli (all packages install functions
@@ -1922,6 +1937,7 @@ handle_command() {
 		# --- Packages manager ---
 		'in'|install) pkg_install ${@} ;;
 		ls|list) pkgs_list ;;
+		gr|get-recipe) pkg_get_recipe ${2} ;;
 		up|upgrade) pkgs_upgrade ;;
 		rm|remove) pkg_remove ${2} ;;
 		cc|clean-cache)
