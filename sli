@@ -6,7 +6,7 @@
 #
 # (c) 2025 0xeeLi ⚡️ MIT License
 #
-sli_version="v0.1.0"
+sli_version="v0.2.0"
 
 # --- Default Lightning paths ---
 
@@ -33,7 +33,8 @@ EDITOR="nano"
 INSTALLED_PKGS=${SLI_DIR}/packages
 CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
-PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/refs/heads/main/packages.list"
+PKGS_RECIPES="/usr/local/share/sli"
+PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/main/packages.list"
 AMBOSS_API="https://api.amboss.space/graphql"
 WALLET_DB="$LND_DIR/data/chain/bitcoin/mainnet/wallet.db"
 
@@ -178,12 +179,12 @@ log_action() {
 # Install packages recipes. Used by sli_init and sli_install
 sli_install_recipes() {
 	if [ -d "recipes" ]; then
-		sudo mkdir -p /usr/local/share/sli
-		echo "/usr/local/share/sli" >> ${INSTALLED_PKGS}/${pkg}/files.list
+		sudo mkdir -p ${PKGS_RECIPES}
+		echo "$PKGS_RECIPES" >> ${INSTALLED_PKGS}/${pkg}/files.list
 		for recipe in recipes/*; do
 			echo " * Installing: $(basename $recipe)"
-			sudo cp -f ${recipe} /usr/local/share/sli
-			echo "/usr/local/share/$(basename $recipe)" >> ${INSTALLED_PKGS}/${pkg}/files.list
+			sudo cp -f ${recipe} ${PKGS_RECIPES}
+			echo "${PKGS_RECIPES}/$(basename $recipe)" >> ${INSTALLED_PKGS}/${pkg}/files.list
 		done
 	fi
 }
@@ -255,7 +256,7 @@ sli_install() {
 	# Install bash completion
 	comp="/usr/share/bash-completion/completions/sli"
 	echo " * Installing SLi bash completion..."
-	sudo cp -f sli-bash-completion.sh ${comp}
+	sudo cp -f ${SRC_DIR}/sli-bash-completion.sh ${comp}
 	echo "$comp" >> ${INSTALLED_PKGS}/${pkg}/files.list
 
 	# Post install
@@ -364,7 +365,7 @@ EOF
 # Show config file if any
 config_show_file() {
 	if [ ! -f "$1" ]; then
-		echo " ✘ No config file found. Try 'sli init <pkg>' to initialize."
+		error "No config file found. Try 'sli init <pkg>' to initialize."
 	else
 		cat "$1"
 	fi
@@ -381,7 +382,7 @@ config_show() {
 		lit) config_show_file "$LIT_CONF" ;;
 		lnd) config_show_file "$LND_CONF" ;;
 		sli) config_show_file "$SLI_CONF" ;;
-		*) echo -e " ✘ No config file for: ${RED}$1${NC}" ;;
+		*) error "No config file for: ${RED}$1${NC}" ;;
 	esac
 	print_separator
 }
@@ -389,7 +390,7 @@ config_show() {
 # Edit config if any. User can customize EDITOR with ~/.sli/sli.conf
 config_edit_file() {
 	if [ ! -f "$1" ]; then
-		echo " ✘ No config file found: Try 'sli init <pkg>' to initialize."
+		error "No config file found: Try 'sli init <pkg>' to initialize."
 	else
 		case "$1" in
 			*.service) sudo ${EDITOR} ${1} ;;
@@ -411,7 +412,7 @@ config_edit() {
 		lit) config_edit_file "$LIT_CONF" ;;
 		lnd) config_edit_file "$LND_CONF" ;;
 		sli) config_edit_file "$SLI_CONF" ;;
-		*) echo " ✘ No config file for: $1" ;;
+		*) error "No config file for ${RED}$1${NC}" ;;
 	esac
 }
 
@@ -616,14 +617,13 @@ wallet_send_onchain() {
 	read -p "Address: " addr
 	read -p "Amount : " amt
 	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
-		echo " ✘ Invalid amount: $amt Must be numeric."
-		return 1
+		error "Invalid amount: $amt Must be numeric."
 	fi
 	if [ -n "$addr" ] && [ -n "$amt" ]; then
 		lncli sendcoins --addr="$addr" --amount="$amt"
 		log_action "Sent $amt sats to $addr"
 	else
-		echo " ✘ Address or amount missing."
+		error "Address or amount missing."
 	fi
 }
 
@@ -636,13 +636,14 @@ wallet_invoice_check() {
 # Generate interactively a Lightning invoice
 wallet_invoice() {
 	check_command "jq"
-	print_header "⚡️ Generate Lightning Invoice"; echo ""
+	print_header "⚡️ Generate Lightning Invoice\n"
+	
+	# Get amount and memo
 	read -p "Amount (sat, default: 1000): " amt
 	amt=${amt:-1000}
 	read -p "Memo (optional): " memo
 	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
-		echo " ✘ Invalid amount: $amt. Must be numeric."
-		return 1
+		error "Invalid amount: $amt. Must be numeric."
 	fi
 	wallet_invoice_check
 
@@ -671,8 +672,7 @@ wallet_qr_invoice() {
 	amt=${amt:-1000}
 	read -p "Memo (optional): " memo
 	if [[ ! "$amt" =~ ^[0-9]+$ ]]; then
-		echo -e "\n ✘ Invalid amount: $amt. Must be numeric."
-		return 1
+		error "Invalid amount: $amt. Must be numeric."
 	fi
 
 	# Generate invoice
@@ -691,8 +691,7 @@ wallet_qr_invoice() {
 	# Generate QR code PNG
 	qrencode -o "$invoice_qr" -s 6 "$invoice"
 	if [ $? -ne 0 ]; then
-		echo " ✘ Failed to generate QR code."
-		return 1
+		error "Failed to generate QR code."
 	fi
 
 	# Save invoice text
@@ -721,7 +720,7 @@ wallet_pay_invoice() {
 	if [ -n "$invoice" ]; then
 		lncli payinvoice "$invoice"
 	else
-		echo " ✘ No invoice provided"
+		error "No invoice provided"
 	fi
 	echo ""
 	print_separator
@@ -807,8 +806,7 @@ fees_set() {
 	read -p "Fee Rate (ppm, default: 200): " fee_rate
 	fee_rate=${fee_rate:-200}
 	if ! [[ "$base_fee" =~ ^[0-9]+$ ]] || ! [[ "$fee_rate" =~ ^[0-9]+$ ]]; then
-		echo " ✘ Invalid input: Base Fee and Fee Rate must be numeric."
-		return 1
+		error "Invalid input: Base Fee and Fee Rate must be numeric."
 	fi
 	
 	fee_rate_decimal=$(echo "scale=6; $fee_rate / 1000000" | bc)
@@ -843,11 +841,12 @@ fees_adjust() {
 	echo ""
 	read -p "Channel Point: " chan_point
 	if [ -z "$chan_point" ]; then
-		echo " ✘ Please specify a channel point."
-		return 1
+		error "Please specify a channel point."
 	fi
+	
 	current_base=$(lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$chan_point\") | .chan_id")" | jq -r '.policy1.fee_base_msat')
 	current_rate=$(lncli getchaninfo "$(lncli listchannels | jq -r ".channels[] | select(.channel_point == \"$chan_point\") | .chan_id")" | jq -r '.policy1.fee_rate_ppm')
+	
 	echo "Current: Base Fee: $current_base msat | Fee Rate: $current_rate ppm"
 	echo ""
 	echo -e "${CYAN}Adjustment options:${NC}"
@@ -864,8 +863,7 @@ fees_adjust() {
 			new_base=$((current_base + 50))
 			new_rate=$((current_rate + 100)) ;;
 		*)
-			echo " ✘ Invalid action. Use 'lower' or 'raise'."
-			return 1 ;;
+			error "Invalid action. Use 'lower' or 'raise'." ;;
 	esac
 	new_rate_decimal=$(echo "scale=6; $new_rate / 1000000" | bc)
 	echo "Applying: Base Fee: $new_base msat | Fee Rate: $new_rate ppm"
@@ -1522,28 +1520,46 @@ node_health() {
 	# Node daemon
 	echo "Service Status:"
 	if systemctl is-active litd >/dev/null 2>&1; then
-		echo -e " --> litd: ${GREEN}Running${NC}"
+		daemon="litd" # Used by memory usage below
+		echo -e " --> ${YELLOW}litd${NC}: ${GREEN}running${NC}"
 	elif systemctl is-active lnd >/dev/null 2>&1; then
-		echo -e " --> lnd: ${GREEN}Running${NC}"
+		daemon="lnd" # Used by memory usage below
+		echo -e " --> ${YELLOW}lnd${NC}: ${GREEN}running${NC}"
 	else
-		echo -e " --> node: ${RED}Stopped${NC}"
+		status="stopped" # Avoid calling lncli below
+		echo -e " --> node: ${RED}stopped${NC}"
+	fi
+	echo ""
+	
+	if [ "$status" != "stopped" ]; then
+		# Sync status
+		echo "Sync Status:"
+		lncli getinfo | jq -r '" --> Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
+		
+		# Connected peers
+		echo -en "\nConnected Peers: "
+		lncli listpeers | jq -r '.peers | length' # | xargs echo " --> Peers:"
+	
+		# Open channel(s)
+		echo -n "Channels Count : "
+		lncli listchannels | jq -r '.channels[] | "\(.chan_id)"' | wc -l
+		echo ""
 	fi
 	
-	# Sync status
-	echo -e "\nSync Status:"
-	lncli getinfo | jq -r '" --> Synced: \(.synced_to_chain) | Block Height: \(.block_height)"'
+	# Node size and memory usage
+	disk_usage=$(du -sh ${LND_DIR} | cut -d $'\t' -f 1 | sed 's/M/ MB/' | sed 's/G/ GB/')
+	echo -e "Disk usage  : ${disk_usage}"
 	
-	# Connected peers
-	echo -en "\nConnected Peers: "
-	lncli listpeers | jq -r '.peers | length' # | xargs echo " --> Peers:"
+	# Node memory usage
+	if [ "$status" != "stopped" ]; then
+		ps -p $(pgrep $daemon) -o %mem,rss | tail -n 1 | \
+			awk '{mb=$2/1024; if(mb>=1024) print \
+				"Memory usage: "mb/1024" GB "$1"%"; else print \
+				"Memory usage: "int(mb)" MB | "$1"%"}'
+	else
+		echo -e "RAM Usage  : N/A"
+	fi
 	
-	# Open channel(s)
-	echo -n "Channels Count : "
-	lncli listchannels | jq -r '.channels[] | "\(.chan_id)"' | wc -l
-	
-	# Node size
-	echo -n "Node Size      : "
-	du -sh ${LND_DIR} | awk '{ print $1 }'
 	print_separator
 }
 
@@ -1693,6 +1709,10 @@ pkg_pre_install() {
 		if [ "$version" == "$PKG_VERSION" ]; then
 			echo -e "${CYAN}$PKG_NAME is already installed${NC}"
 			echo -e "Version: $version\n"; exit 0
+		else
+			# Remove version in pkg.conf in case of upgrade, will be add later 
+			# by pkg_post_install
+			sed -i '/version=*/'d ${PKG_DATA}/pkg.conf
 		fi
 	fi
 	
