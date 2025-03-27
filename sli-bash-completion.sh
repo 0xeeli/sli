@@ -16,7 +16,7 @@ _sli_completions() {
 	fees_cmds="check set adjust bump"
 	wallet_cmds="init logs new send list-addresses balance invoice qr-invoice remove-qr pay-invoice"
 	tools="macaroon-hex gen-passwords node-backup node-restore node-extract security-check ping-amboss wallet"
-	pkgs_cmds="install upgrade list clean-cache remove"
+	pkgs_cmds="list install upgrade get-recipe clean-cache remove"
 	daemons="albyhub litd lnd loopd poold"
 
 	# Fetch installed and available packages dynamically (if possible)

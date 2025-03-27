@@ -34,6 +34,7 @@ INSTALLED_PKGS=${SLI_DIR}/packages
 CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
 PKGS_RECIPES=${SLI_DIR}/recipes
+PKGS_RECIPES_SUM=${SLI_DIR}/recipes.sha512
 PKGS_RECIPES_URL="https://raw.githubusercontent.com/0xeeli/sli/main/recipes"
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/main/packages.list"
 AMBOSS_API="https://api.amboss.space/graphql"
@@ -263,18 +264,6 @@ sli_install() {
 
 	# Post install
 	pkg_post_install
-}
-
-sli_testsuite() {
-	print_header "⚡️ SLi Testsuite"
-	echo -e "Colors: ${PURPLE}purple${NC} ${CYAN}cyan${NC} ${YELLOW}yellow${NC} ${RED}red${NC} ${GREEN}green${NC}"
-	echo -n "pkg_get_version sli: "; pkg_get_version sli
-	if [ -f "debug_recipe.sh" ]; then
-		echo ""
-		pkg_install "debug"
-		echo ""
-		pkg_remove "debug"
-	fi
 }
 
 # Let user use lit in place of litd. also used to check file exist (ie litd.service)
@@ -1174,98 +1163,6 @@ lit_init() {
 	print_separator
 }
 
-# This pool package provides loop and loopd (deamon). Conflict with Lit
-# package, we keep this build.
-loop_install() {
-
-	PKG_NAME="loop"
-	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
-	SRC_URL="https://github.com/lightninglabs/loop/releases/download"
-	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
-	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
-	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
-
-	# Pre install
-	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
-	pkg_download_tarball
-	pkg_extract_tarball
-
-	# Install to /usr/local/bin
-	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
-	echo " * Installing: ${PKG_NAME}"
-	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
-	echo " * Installing: ${PKG_NAME}d"
-	sudo cp -f "${SRC_DIR}/${PKG_NAME}d" /usr/local/bin
-
-	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
-	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
-
-	# Loop will conflict with LiT Bundle, prefer this version.
-	# loop-mode=disable can be set in lit.conf
-	if [ -d ${INSTALLED_PKGS}/lit ]; then
-		if grep -q ".*loop" ${INSTALLED_PKGS}/lit/files.list 2>/dev/null; then
-			echo -e " * ${YELLOW}NOTE:${NC} Loop already installed by lit --> Erasing"
-			sed -i '/^\/usr\/local\/bin\/loop$/d' "${INSTALLED_PKGS}/lit/files.list"
-			# Store a backup of 'lit loop' to be restored on loop remove
-			#cp /usr/local/bin/loop ${INSTALLED_PKGS}/lit
-		fi
-	fi
-
-	# Systemd service
-	config_service_unit "loopd" "Loopd Off/On Chain Bridge" "simple"
-
-	echo "Documentation: https://lightning.engineering/loop/"
-
-	# Post install
-	pkg_post_install
-}
-
-# This pool package provides pool and poold (deamon) standalone pool
-# provided by LiT don't work properly.
-pool_install() {
-
-	PKG_NAME="pool"
-	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
-	SRC_URL="https://github.com/lightninglabs/pool/releases/download"
-	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
-	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
-	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
-
-	# Pre install
-	pkg_pre_install "$PKG_NAME" "$PKG_VERSION"
-	pkg_download_tarball
-	pkg_extract_tarball
-
-	# Install to /usr/local/bin
-	echo -e "${CYAN}Install path: /usr/local/bin${NC}"
-	echo " * Installing: ${PKG_NAME}"
-	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
-	echo " * Installing: ${PKG_NAME}d"
-	sudo cp -f "${SRC_DIR}/${PKG_NAME}d" /usr/local/bin
-
-	echo "/usr/local/bin/${PKG_NAME}" > ${PKG_DATA}/files.list
-	echo "/usr/local/bin/${PKG_NAME}d" >> ${PKG_DATA}/files.list
-
-	# Pool will conflict with LiT Bundle, prefer this version.
-	# pool-mode=disable can be set in lit.conf
-	if [ -d ${INSTALLED_PKGS}/lit ]; then
-		if grep -q ".*pool" ${INSTALLED_PKGS}/lit/files.list 2>/dev/null; then
-			echo -e " * ${CYAN}NOTE:${NC} Pool already installed by lit --> Erasing"
-			sed -i '/^\/usr\/local\/bin\/pool$/d' "${INSTALLED_PKGS}/lit/files.list"
-			# Store a backup of 'lit pool' to be restored on pool remove
-			#cp /usr/local/bin/pool ${INSTALLED_PKGS}/lit
-		fi
-	fi
-
-	# Systemd service.
-	config_service_unit "poold" "Lightning Pool Daemon" "simple"
-
-	echo "Documentation: https://pool.lightning.engineering/"
-
-	# Post install
-	pkg_post_install
-}
-
 # Alby Hub install
 albyhub_install() {
 
@@ -1745,6 +1642,7 @@ pkg_pre_install() {
 				echo "You can either remove Lit or continue, and SLi will erase the $PKG_NAME Lit version."
 				echo ""
 				read -p "Continue installation anyway ? (yes/no) " answer
+				echo ""
 				[ "$answer" != "yes" ] && exit 0 
 			fi ;;
 		lnd)
@@ -1755,6 +1653,7 @@ pkg_pre_install() {
 				echo "You can use LiT remote mode, so you have LiT for UI and LND as deamon"
 				echo ""
 				read -p "Continue installation anyway ? (yes/no) " answer
+				echo ""
 				[ "$answer" != "yes" ] && exit 0
 			fi ;;
 	esac
@@ -1887,6 +1786,31 @@ init() {
 	esac
 }
 
+#
+# --- Developers Tools ---
+#
+
+sli_testsuite() {
+	print_header "⚡️ SLi Testsuite"
+	echo -e "Colors: ${PURPLE}purple${NC} ${CYAN}cyan${NC} ${YELLOW}yellow${NC} ${RED}red${NC} ${GREEN}green${NC}"
+	echo -n "pkg_get_version sli: "; pkg_get_version sli
+	if [ -f "debug_recipe.sh" ]; then
+		echo ""
+		pkg_install "debug"
+		echo ""
+		pkg_remove "debug"
+	fi
+}
+
+sli_gen_recipes_sum() {
+	if [ -d "recipes" ]; then
+		echo -e "Generating recipes sum: ${YELLOW}recipes.sha512${NC}"
+		sha512sum recipes/* > recipes.sha512
+	else
+		error "You must be in SLi source directory"
+	fi
+}
+
 # Handle channel commands
 chan() {
 	case "$2" in
@@ -1963,16 +1887,17 @@ handle_command() {
 		ping-amboss) ping_amboss ;;
 		wa|wallet) wallet ${@} ;;
 		# --- Packages manager ---
-		'in'|install) pkg_install ${2} ;;
 		ls|list) pkgs_list ;;
-		gr|get-recipe) pkg_get_recipe "get" ${2} ;;
+		'in'|install) pkg_install ${2} ;;
 		up|upgrade) pkgs_upgrade ;;
+		gr|get-recipe) pkg_get_recipe "get" ${2} ;;
 		rm|remove) pkg_remove ${2} ;;
 		cc|clean-cache)
 			echo "Removing cache directory content..."
 			rm -rf ${CACHE_DIR}/* ;;
-		# --- Developer Tools ---
+		# --- Developers Tools ---
 		testsuite) sli_testsuite ;;
+		grs|gen-recipes-sum) sli_gen_recipes_sum ;;
 		*) usage ;;
 	esac
 }
