@@ -33,7 +33,7 @@ EDITOR="nano"
 INSTALLED_PKGS=${SLI_DIR}/packages
 CACHE_DIR=${SLI_DIR}/cache
 PKGS_LIST=${SLI_DIR}/packages.list
-PKGS_RECIPES="/usr/local/share/sli"
+PKGS_RECIPES=${SLI_DIR}/recipes
 PKGS_RECIPES_URL="https://raw.githubusercontent.com/0xeeli/sli/main/recipes"
 PKGS_URL="https://raw.githubusercontent.com/0xeeli/sli/main/packages.list"
 AMBOSS_API="https://api.amboss.space/graphql"
@@ -179,14 +179,14 @@ log_action() {
 #
 
 # Install packages recipes. Used by sli_init and sli_install
+# We dont track them since they stay in user-space, if user wants to
+# uninstall Sli he can run: sli purge
 sli_install_recipes() {
 	if [ -d "recipes" ]; then
-		sudo mkdir -p ${PKGS_RECIPES}
-		echo "$PKGS_RECIPES" >> ${INSTALLED_PKGS}/${pkg}/files.list
+		mkdir -p ${PKGS_RECIPES}
 		for recipe in recipes/*; do
 			echo " * Installing: $(basename $recipe)"
 			sudo cp -f ${recipe} ${PKGS_RECIPES}
-			echo "${PKGS_RECIPES}/$(basename $recipe)" >> ${INSTALLED_PKGS}/${pkg}/files.list
 		done
 	fi
 }
@@ -252,7 +252,7 @@ sli_install() {
 	sudo cp -f ${SRC_DIR}/${PKG_NAME} /usr/local/bin
 	echo "/usr/local/bin/sli" > ${PKG_DATA}/files.list
 	
-	# Packages recipes to /usr/local/share/sli
+	# Packages recipes in PKGS_RECIPES
 	sli_install_recipes
 	
 	# Install bash completion
@@ -1604,31 +1604,45 @@ EOT
 #
 
 # Packages recipes can be downloaded individualy since they can be updated
-# or added without a new SLi release. Usage: pkg_get_recipe "pkgname" "--no-header"
+# or added without a new SLi release.
 pkg_get_recipe() {
-	local package="$1"
+	local action="$1" package="$2"
+	
 	# Check if package exist
 	if ! grep -q "^${package}|" ${PKGS_LIST}; then
-		error "Package $package don't exist"
+		error "Package ${RED}$package${NC} don't exist"
+	else
+		# Ensure local recipes dir exist
+		mkdir -p ${PKGS_RECIPES}
 	fi
-	[ "$2" == "--no-header" ] || print_header "📦 Get $package package recipe"
-	echo "Downloading recipe..."
-	wget -q --show-progress ${PKGS_RECIPES_URL}/${package}_recipe.sh
+	
+	# sli get-recipe <pkg>
+	if [ "$action" == "get" ] && [ ! -f ${package}_recipe.sh ]; then
+		echo -e "Downloading ${CYAN}$package${NC} recipe..."
+		wget -q --show-progress ${PKGS_RECIPES_URL}/${package}_recipe.sh
+	
+	# No download if recipe exist in current dir
+	elif [ "$action" == "get" ] && [ -f ${package}_recipe.sh ]; then
+		echo -e "Recipe exist: ${YELLOW}$(pwd)/${package}_recipe.sh${NC}"
+	
+	# Get and install recipe if needed
+	elif [ "$action" == "install" ] && [ ! -f ${PKGS_RECIPES}/${package}_recipe.sh ]; then
+		echo "Downloading $package recipe..."
+		cd ${PKGS_RECIPES}
+		wget -q --show-progress ${PKGS_RECIPES_URL}/${package}_recipe.sh
+	fi
 }
 
 # We can install or init a package from a sourced recipe.sh script (providing
-# pkgname_install, pkgname_init, etc) from the curremt dir. Useful for development.
-# Check for a recipe in /usr/local/share/sli (all packages install functions
-# may/will... be in this path). Example: pkg_source_recipe "pkg"
+# pkgname_install, pkgname_init, etc) from the curremt dir, useful for development.
+# Then check for a recipe in PKGS_RECIPES. Example: pkg_source_recipe "pkg"
 pkg_source_recipe() {
 	if [ -f ${1}_recipe.sh ]; then
+		echo -e "Recipe: ${YELLOW}$(pwd)/${1}_recipe.sh${NC}\n"
 		source ${1}_recipe.sh
-	# Let see if a package _recipe.sh is installed
-	elif [ -f /usr/local/share/sli/${1}_recipe.sh ]; then
-		source /usr/local/share/sli/${1}_recipe.sh
 	else
-		echo -e "No built-in package or recipe available for: ${RED}$1${NC}"
-		echo "" && exit 0
+		echo -e "Recipe: ${YELLOW}${PKGS_RECIPES}/${1}_recipe.sh${NC}\n"
+		source ${PKGS_RECIPES}/${1}_recipe.sh
 	fi
 }
 
@@ -1643,6 +1657,7 @@ pkg_install() {
 	if [ $(declare -F ${2}_install) ]; then
 		${2}_install
 	else
+		pkg_get_recipe "install" "$2"
 		pkg_source_recipe "$2"
 		if [ ! $(declare -F ${2}_install) ]; then
 			error "Missing: ${2}_install in recipe\n"
@@ -1937,7 +1952,7 @@ handle_command() {
 		# --- Packages manager ---
 		'in'|install) pkg_install ${@} ;;
 		ls|list) pkgs_list ;;
-		gr|get-recipe) pkg_get_recipe ${2} ;;
+		gr|get-recipe) pkg_get_recipe "get" ${2} ;;
 		up|upgrade) pkgs_upgrade ;;
 		rm|remove) pkg_remove ${2} ;;
 		cc|clean-cache)
