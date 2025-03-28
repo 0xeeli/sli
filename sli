@@ -1282,8 +1282,13 @@ pkg_install() {
 	${pkg}_install
 }
 
+# Use a packages.list in current dir (useful for dev's) or in ~/.sli
 pkg_get_version() {
-	grep "^${1}|" ${PKGS_LIST} | cut -d "|" -f 2
+	if [ -f "packages.list" ]; then
+		grep "^${1}|" packages.list | cut -d "|" -f 2
+	else
+		grep "^${1}|" ${PKGS_LIST} | cut -d "|" -f 2
+	fi
 }
 
 # Download pkg if needed (we are in CACHE_DIR)
@@ -1307,6 +1312,11 @@ pkg_extract_tarball() {
 		*.tar.bz2) tar xjf ${TARBALL} ;;
 		*.zip) unzip ${TARBALL} ;;
 	esac
+	if [ "$?" -eq 0 ]; then
+		mkdir -p ${PKG_DATA}
+	else
+		error "Extracting $TARBALL"
+	fi
 }
 
 pkgs_get_list() {
@@ -1366,13 +1376,13 @@ pkg_pre_install() {
 	
 	print_header "⚡️ Installing: $PKG_NAME $PKG_VERSION"
 	# Continuing for install/upgrade - We work in SLi cache directory
-	mkdir -p ${PKG_DATA} ${CACHE_DIR} && cd ${CACHE_DIR}
+	mkdir -p ${CACHE_DIR} && cd ${CACHE_DIR}
 	# Keep track of previous installed files
 	mv -f ${PKG_DATA}/files.list ${PKG_DATA}/files.list.old 2>/dev/null
 }
 
 # After install
-pkg_post_install() {
+pkg_post_install() { 
 	# Record version & clean cache
 	echo "version=\"$PKG_VERSION\"" >> ${PKG_DATA}/pkg.conf
 	[ "$1" == "keep_src" ] || rm -rf ${SRC_DIR}
@@ -1597,7 +1607,8 @@ handle_command() {
 		gr|get-recipe) pkg_get_recipe "get" ${2} ;;
 		rm|remove) pkg_remove ${2} ;;
 		cc|clean-cache)
-			echo "Removing cache directory content..."
+			size=$(du -sh ${CACHE_DIR} | awk '{ print $1 }')
+			echo "Removing cache directory content: $size"
 			rm -rf ${CACHE_DIR}/* ;;
 		# --- Developers Tools ---
 		testsuite) sli_testsuite ;;
