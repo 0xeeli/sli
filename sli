@@ -181,13 +181,13 @@ log_action() {
 
 # Install packages recipes. Used by sli_init and sli_install
 # We dont track them since they stay in user-space, if user wants to
-# uninstall Sli he can run: sli purge
+# uninstall Sli he can run: rm -rf ~/.sli
 sli_install_recipes() {
 	if [ -d "recipes" ]; then
 		mkdir -p ${PKGS_RECIPES}
 		for recipe in recipes/*; do
 			echo " * Installing: $(basename $recipe)"
-			sudo cp -f ${recipe} ${PKGS_RECIPES}
+			cp -f ${recipe} ${PKGS_RECIPES}
 		done
 	fi
 }
@@ -231,8 +231,7 @@ sli_logs() {
 	print_separator
 }
 
-# Used for upgrade, we keep main branch for now since we have control
-# on packages.list to modify versions.
+# Used for upgrade.
 sli_install() {
 
 	PKG_NAME="sli"
@@ -258,7 +257,7 @@ sli_install() {
 	
 	# Install bash completion
 	comp="/usr/share/bash-completion/completions/sli"
-	echo " * Installing SLi bash completion..."
+	echo " * Installing: SLi bash completion..."
 	sudo cp -f ${SRC_DIR}/sli-bash-completion.sh ${comp}
 	echo "$comp" >> ${INSTALLED_PKGS}/${pkg}/files.list
 
@@ -385,6 +384,16 @@ config_show() {
 		lit) config_show_file "$LIT_CONF" ;;
 		lnd) config_show_file "$LND_CONF" ;;
 		sli) config_show_file "$SLI_CONF" ;;
+		thunderhub)
+			if [ -f ${INSTALLED_PKGS}/thunderhub/pkg.conf ]; then
+				source ${INSTALLED_PKGS}/thunderhub/pkg.conf
+				echo -e "${CYAN}User(s) config:${NC} ${YELLOW}${HOME}/.thunderhub/config.yaml${NC}\n" 
+				cat ${HOME}/.thunderhub/config.yaml
+				echo -e "\n${CYAN}Server config:${NC} ${YELLOW}${install_dir}/.env.local${NC}\n"
+				cat ${install_dir}/.env.local
+			else
+				echo "Thunderhub is not installed"
+			fi ;;
 		*) error "No config file for: ${RED}$1${NC}" ;;
 	esac
 	print_separator
@@ -415,7 +424,16 @@ config_edit() {
 		lit) config_edit_file "$LIT_CONF" ;;
 		lnd) config_edit_file "$LND_CONF" ;;
 		sli) config_edit_file "$SLI_CONF" ;;
-		*) error "No config file for ${RED}$1${NC}" ;;
+		thunderhub)
+			if [ -f ${INSTALLED_PKGS}/thunderhub/pkg.conf ]; then
+				source ${INSTALLED_PKGS}/thunderhub/pkg.conf
+				echo "Thunderhub have 2 config files:" 
+				echo -e " User(s) --> ${YELLOW}${HOME}/.thunderhub/config.yaml${NC}"
+				echo -e " Server  --> ${YELLOW}${install_dir}/.env.local${NC}"
+			else
+				echo "Thunderhub is not installed"
+			fi ;;
+		*) error "No config file found for ${RED}$1${NC}" ;;
 	esac
 }
 
@@ -771,7 +789,8 @@ chan_close() {
 chan_list() {
 	check_command "jq"
 	print_header "🔗 Open Lightning Channels"
-	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey)\nCapacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)"'
+	echo ""
+	lncli listchannels | jq -r '.channels[] | "Peer: \(.remote_pubkey)\nCapacity: \(.capacity) sat | Local: \(.local_balance) sat | Active: \(.active)\n"'
 	print_separator
 }
 
@@ -817,7 +836,7 @@ fees_set() {
 		echo "Applying globally: Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" \
-			--min_htlc_msat 1000 --time_lock_delta 40 | \
+			--min_htlc_msat 100 --time_lock_delta 40 | \
 			jq -r 'if .failed_updates == [] then "✔ Fees updated successfully." else "Error occurred" end'
 		
 		log_action "Set global fees: Base $base_fee msat, Rate $fee_rate ppm"
@@ -826,7 +845,7 @@ fees_set() {
 		echo " --> Base Fee: $base_fee msat | Fee Rate: $fee_rate ppm"
 		
 		lncli updatechanpolicy --base_fee_msat "$base_fee" --fee_rate "$fee_rate_decimal" \
-			--chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40 | \
+			--chan_point "$chan_point" --min_htlc_msat 100 --time_lock_delta 40 | \
 			jq -r 'if .failed_updates == [] then "✔ Fees updated successfully." else "Error occurred" end'
 		
 		log_action "Set fees for channel $chan_point: Base $base_fee msat, Rate $fee_rate ppm"
@@ -872,7 +891,7 @@ fees_adjust() {
 	echo "Applying: Base Fee: $new_base msat | Fee Rate: $new_rate ppm"
 	
 	lncli updatechanpolicy --base_fee_msat "$new_base" --fee_rate "$new_rate_decimal" \
-		--chan_point "$chan_point" --min_htlc_msat 1000 --time_lock_delta 40
+		--chan_point "$chan_point" --min_htlc_msat 100 --time_lock_delta 40
 	log_action "Adjusted fees for $chan_point: Base $new_base msat, Rate $new_rate ppm ($action)"
 	echo "✔ Fees adjusted successfully."
 	print_separator
@@ -1099,6 +1118,14 @@ node_health() {
 		status="stopped" # Avoid calling lncli below
 		echo -e " --> node: ${RED}stopped${NC}"
 	fi
+	# Alby Hub
+	if systemctl is-active albyhub >/dev/null 2>&1; then
+		echo -e " --> ${YELLOW}albyhub${NC}: ${GREEN}running${NC}"
+	fi
+	# Thunderhub
+	if systemctl is-active thunderhub >/dev/null 2>&1; then
+		echo -e " --> ${YELLOW}hunderhub${NC}: ${GREEN}running${NC}"
+	fi
 	echo ""
 	
 	if [ "$status" != "stopped" ]; then
@@ -1127,7 +1154,7 @@ node_health() {
 				"Memory usage: "mb/1024" GB "$1"%"; else print \
 				"Memory usage: "int(mb)" MB | "$1"%"}'
 	else
-		echo -e "RAM Usage  : N/A"
+		echo -e "RAM usage   : N/A"
 	fi
 	
 	print_separator
@@ -1247,17 +1274,12 @@ pkg_install() {
 		echo "If you need to reinstall this version, run: sli init"
 		echo "" && exit 0
 	fi
-	# Use built-in package (sli)
-	if [ $(declare -F ${pkg}_install) ]; then
-		${pkg}_install
-	else
-		pkg_get_recipe "install" "$pkg"
-		pkg_source_recipe "$pkg"
-		if [ ! $(declare -F ${pkg}_install) ]; then
-			error "Missing: ${pkg}_install in recipe\n"
-		fi
-		${pkg}_install
+	pkg_get_recipe "install" "$pkg"
+	pkg_source_recipe "$pkg"
+	if [ ! $(declare -F ${pkg}_install) ]; then
+		error "Missing: ${pkg}_install in recipe\n"
 	fi
+	${pkg}_install
 }
 
 pkg_get_version() {
@@ -1383,7 +1405,7 @@ pkgs_list() {
 	print_separator
 }
 
-# Downlad a packages.list, compare installed version to the list
+# Download a packages.list, compare installed version to the list
 # upgrade everything
 pkgs_upgrade() {
 	print_header "⚡️ Packages Upgrade"
@@ -1538,7 +1560,6 @@ wallet() {
 
 handle_command() {
 	case "$1" in
-
 		version|--version) sli_version ;;
 		init) init ${@} ;;
 		start) service_start ${@} ;;
