@@ -6,7 +6,7 @@
 #
 # (c) 2025 0xeeLi ⚡️ MIT License
 #
-sli_version="v0.2.0"
+sli_version="v0.3.0"
 
 # --- Default Lightning paths ---
 
