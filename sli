@@ -355,6 +355,7 @@ WantedBy=multi-user.target
 EOF
 		# Track installed file
 		echo "/etc/systemd/system/${unit}" >> ${PKG_DATA}/files.list
+		log_action "Created /etc/systemd/system/${unit}"
 		sudo systemctl daemon-reload
 		read -p "Do you wish to enable $1 on each boot ? (yes/no) " enable
 		if [ "$enable" == "yes" ]; then
@@ -499,6 +500,7 @@ sign_message() {
 	echo -e "\n${CYAN}Signature:${NC}\n"
 	if [ -n "$message" ]; then
 		lncli signmessage "$message" | jq -r '.signature'
+		log_action "Signed message $message"
 	fi
 	print_separator
 }
@@ -925,6 +927,7 @@ macaroon_to_hex() {
 		echo " --> ${path}"
 	else
 		xxd -ps -u -c 1000 "${path}"
+		log_action "Converted $macaroon to HEX"
 	fi
 	print_separator
 }

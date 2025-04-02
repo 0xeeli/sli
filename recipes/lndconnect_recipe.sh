@@ -6,7 +6,7 @@ lndconnect_install() {
 
 	PKG_NAME="lndconnect"
 	PKG_VERSION="$(pkg_get_version $PKG_NAME)"
-	SRC_URL="https://github.com/LN-Zap/lndconnect/releases/download/"
+	SRC_URL="https://github.com/LN-Zap/lndconnect/releases/download"
 	TARBALL="${PKG_NAME}-linux-amd64-${PKG_VERSION}.tar.gz"
 	SRC_DIR="${PKG_NAME}-linux-amd64-${PKG_VERSION}"
 	DL_URL=${SRC_URL}/${PKG_VERSION}/${TARBALL}
